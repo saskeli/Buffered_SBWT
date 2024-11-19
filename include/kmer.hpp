@@ -112,7 +112,8 @@ class Kmer {
     return (data_[block_idx] >> ((31 - block_offset) * 2)) & 0x03;
   }
 
-  uint64_t get_first_v(uint16_t i) const {
+  template<uint16_t i>
+  uint64_t get_first_v() const {
     uint64_t ret = 0;
     for (uint64_t c = 0; c < i; ++c) {
       ret = (ret << 2) | get_v(i - 1 - c);
