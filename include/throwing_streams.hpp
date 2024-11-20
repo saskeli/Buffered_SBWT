@@ -29,7 +29,7 @@ public:
     ofstream stream;
 
     // If file open fails, throws an error
-    throwing_ofstream(string filename, ios_base::openmode mode = ios_base::out) : filename(filename) {
+    throwing_ofstream(string file_name, ios_base::openmode mode = ios_base::out) : filename(file_name) {
         stream.open(filename, mode);
         if(!stream.good()){
             throw runtime_error("Error opening file: " + filename);
@@ -45,7 +45,8 @@ public:
     }
 
     // Throws an error if file open failed
-    void open(string filename, ios_base::openmode mode = ios_base::out){
+    void open(string file_name, ios_base::openmode mode = ios_base::out){
+        filename = file_name;
         stream.open(filename, mode);
         if(!stream.good()){
             throw runtime_error("Error opening file: " + filename);
@@ -84,7 +85,7 @@ class throwing_ifstream{
 
     throwing_ifstream() {}
     // If file open failed, throws an error
-    throwing_ifstream(string filename, ios_base::openmode mode = ios_base::in) : filename(filename) {
+    throwing_ifstream(string file_name, ios_base::openmode mode = ios_base::in) : filename(file_name) {
         stream.open(filename, mode);
         if(!stream.good()){
             throw runtime_error("Error opening file: '" + filename + "'");
@@ -118,7 +119,8 @@ class throwing_ifstream{
     }
 
     // If open fails, throws an error
-    void open(string filename, ios_base::openmode mode = ios_base::in){
+    void open(string file_name, ios_base::openmode mode = ios_base::in){
+        filename = file_name;
         stream.open(filename, mode);
         if(!stream.good()){
             throw runtime_error("Error opening file: '" + filename + "'");

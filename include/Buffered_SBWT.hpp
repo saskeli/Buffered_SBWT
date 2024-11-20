@@ -3,13 +3,15 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <parallel/algorithm>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
+#include "kmer.hpp"
 #include "sdsl/bit_vectors.hpp"
 #include "sdsl/rank_support_v.hpp"
-#include "kmer.hpp"
 #include "throwing_streams.hpp"
 #include "utils.hpp"
 
@@ -25,17 +27,6 @@ const std::string SBWT_VARIANT =
 template <uint16_t k, uint16_t precalc_k = 8>
 class Buffered_SBWT {
  private:
-  std::array<sdsl::bit_vector, 4> bits_;
-  std::array<sdsl::rank_support_v5<>, 4> rank_supports_;
-  std::array<sdsl::bit_vector, 4> new_bits_;
-  sdsl::bit_vector suffix_group_starts_;
-  sdsl::bit_vector new_suffix_groups_;
-  std::array<uint64_t, 5> c_table_;
-  std::vector<std::pair<uint64_t, uint64_t>> kmer_prefix_precalc_;
-  uint64_t n_nodes_;
-  uint64_t n_kmers_;
-  uint64_t buffer_limit_;
-
   typedef Kmer<k> Kmer_t;
 
   class Dummy_trie;
@@ -46,7 +37,7 @@ class Buffered_SBWT {
     uint64_t source;
     uint64_t pred;
     std::array<uint8_t, 4> edge;
-    uint8_t prefix_suffix_group_size;
+    uint8_t pred_size;
     bool group_head = false;
     bool b_pred = false;
 
@@ -57,6 +48,18 @@ class Buffered_SBWT {
   static_assert(precalc_k <= k);
   static_assert(precalc_k <= 20);
   static_assert(precalc_k > 0);
+
+  std::array<sdsl::bit_vector, 4> bits_;
+  std::array<sdsl::rank_support_v5<>, 4> rank_supports_;
+  std::array<sdsl::bit_vector, 4> new_bits_;
+  sdsl::bit_vector suffix_group_starts_;
+  sdsl::bit_vector new_suffix_groups_;
+  std::array<uint64_t, 5> c_table_;
+  std::vector<std::pair<uint64_t, uint64_t>> kmer_prefix_precalc_;
+  std::vector<B_elem> buffer_;
+  uint64_t n_nodes_;
+  uint64_t n_kmers_;
+  uint64_t buffer_limit_;
 
   constexpr uint64_t gigs_to_belems(double gigs) const {
     gigs *= 1024 * 1024 * 1024;
@@ -73,8 +76,8 @@ class Buffered_SBWT {
       exit(1);
     }
 #endif
-    a = rank_supports_[v]->rank(a);
-    b = rank_supports_[v]->rank(b);
+    a = rank_supports_[v].rank(a);
+    b = rank_supports_[v].rank(b);
     a += c_table_[v];
     b += c_table_[v];
   }
@@ -89,7 +92,7 @@ class Buffered_SBWT {
       for (uint16_t i = 0; i < start; ++i) {
         s_km = s_km.suf();
       }
-      auto precalc_idx = s_km.get_first_v<precalc_k>();
+      auto precalc_idx = s_km.template get_first_v<precalc_k>();
       auto I = kmer_prefix_precalc_[precalc_idx];
       a = I.first;
       b = I.second;
@@ -123,7 +126,7 @@ class Buffered_SBWT {
     bool found;
     while (ss.next(pred_idx, pred_size, loc, found, kmer)) {
       if (!found) {
-        vec.push_back({kmer, loc, pred_idx, {0, 0, 0, 0}, pred_size});
+        vec.push_back({kmer, loc, pred_idx, {0, 0, 0, 0}, uint8_t(pred_size)});
       }
     }
   }
@@ -144,27 +147,27 @@ class Buffered_SBWT {
   }
 
   void compute_buffer_edges() {
-    __gnu_parallel::sort(buffer.begin(), buffer.end());
+    __gnu_parallel::sort(buffer_.begin(), buffer_.end());
     uint64_t trg = 0;
-    for (uint64_t src = 1; src < buffer.size(); src++) {
-      if (buffer[trg].kmer != buffer[src].kmer) {
-        buffer[++trg] = buffer[src];
+    for (uint64_t src = 1; src < buffer_.size(); src++) {
+      if (buffer_[trg].kmer != buffer_[src].kmer) {
+        buffer_[++trg] = buffer_[src];
       }
     }
     ++trg;
-    buffer.resize(trg);
+    buffer_.resize(trg);
 
     uint64_t a_start = 0;
     uint64_t i = 0;
-    while (i < buffer.size() && buffer[i].kmer.get_v(k - 1) == 0) {
+    while (i < buffer_.size() && buffer_[i].kmer.get_v(k - 1) == 0) {
       ++i;
     }
     uint64_t c_start = i;
-    while (i < buffer.size() && buffer[i].kmer.get_v(k - 1) == 1) {
+    while (i < buffer_.size() && buffer_[i].kmer.get_v(k - 1) == 1) {
       ++i;
     }
     uint64_t g_start = i;
-    while (i < buffer.size() && buffer[i].kmer.get_v(k - 1) == 2) {
+    while (i < buffer_.size() && buffer_[i].kmer.get_v(k - 1) == 2) {
       ++i;
     }
     uint64_t t_start = i;
@@ -175,48 +178,48 @@ class Buffered_SBWT {
     a_start = trg;
     Kmer_t prev;
     for (i = 0; i < trg; ++i) {
-      Kmer_t ip = buffer[i].kmer.suf();
+      Kmer_t ip = buffer_[i].kmer.suf();
       if (i == 0 || ip != prev) {
-        buffer[i].group_head = true;
+        buffer_[i].group_head = true;
       } else {
         continue;
       }
       prev = ip;
       while (ai < c_start) {
-        auto ec = buffer[ai].kmer.pref();
+        auto ec = buffer_[ai].kmer.pref();
         if (ip == ec) {
-          buffer[i].edge[0] = 1;
-          buffer[ai].b_pred = true;
+          buffer_[i].edge[0] = 1;
+          buffer_[ai].b_pred = true;
         } else if (ec > ip) {
           break;
         }
         ++ai;
       }
       while (ci < g_start) {
-        auto ec = buffer[ci].kmer.pref();
+        auto ec = buffer_[ci].kmer.pref();
         if (ip == ec) {
-          buffer[i].edge[1] = 1;
-          buffer[ci].b_pred = true;
+          buffer_[i].edge[1] = 1;
+          buffer_[ci].b_pred = true;
         } else if (ec > ip) {
           break;
         }
         ++ci;
       }
       while (gi < t_start) {
-        auto ec = buffer[gi].kmer.pref();
+        auto ec = buffer_[gi].kmer.pref();
         if (ip == ec) {
-          buffer[i].edge[2] = 1;
-          buffer[gi].b_pred = true;
+          buffer_[i].edge[2] = 1;
+          buffer_[gi].b_pred = true;
         } else if (ec > ip) {
           break;
         }
         ++gi;
       }
       while (ti < a_start) {
-        auto ec = buffer[ti].kmer.pref();
+        auto ec = buffer_[ti].kmer.pref();
         if (ip == ec) {
-          buffer[i].edge[3] = 1;
-          buffer[ti].b_pred = true;
+          buffer_[i].edge[3] = 1;
+          buffer_[ti].b_pred = true;
         } else if (ec > ip) {
           break;
         }
@@ -230,13 +233,13 @@ class Buffered_SBWT {
     compute_buffer_edges();
     Dummy_trie dummies(*this);
 #pragma omp parallel for
-    for (uint64_t buffer_idx = 0; buffer_idx < buffer.size(); ++buffer_idx) {
-      if (buffer[buffer_idx].group_head == false) {
+    for (uint64_t buffer_idx = 0; buffer_idx < buffer_.size(); ++buffer_idx) {
+      if (buffer_[buffer_idx].group_head == false) {
         continue;
       }
       // TODO: Given a suffix group bv, potential location, and predecessor
       // suffix group, can this be done better?
-      auto I = search_kmer<k, 1>(buffer[buffer_idx].kmer);
+      auto I = search_kmer<Kmer_t, k, 1>(buffer_[buffer_idx].kmer);
       // This (I) is the suffix group in the static_sbwt.
       // If the suffix group is empty {-1, -1}, then the k-mer
       //  will be its own suffix group, unless there is another
@@ -255,15 +258,15 @@ class Buffered_SBWT {
         uint64_t a_nb = ~a_b;
         uint64_t d_tree_idx;
 #pragma omp critical
-        { d_tree_idx = dummies.mark_for_removal(buffer[buffer_idx].kmer); }
+        { d_tree_idx = dummies.mark_for_removal(buffer_[buffer_idx].kmer); }
         if (d_tree_idx > 0) {
           // We are replacing a dummy with a suffix group from the
           // buffer. The suffix group start from the buffer does not
           // need to change.
           for (uint16_t i = 0; i < 4; ++i) {
-            buffer[buffer_idx].edge[i] |= dummies.nodes[d_tree_idx].out[i] > 0;
+            buffer_[buffer_idx].edge[i] |= dummies.nodes[d_tree_idx].out[i] > 0;
           }
-        } else if (buffer[buffer_idx].source == a) {
+        } else if (buffer_[buffer_idx].source == a) {
           // the buffer element will become the suffix group leader.
           // Steal children from the old leader.
           uint64_t* d = suffix_group_starts_.data();
@@ -271,7 +274,7 @@ class Buffered_SBWT {
           d[a_w] = d[a_w] & a_nb;
           for (uint16_t ci = 0; ci < 4; ++ci) {
             if (bits_[ci][a]) {
-              buffer[buffer_idx].edge[ci] = true;
+              buffer_[buffer_idx].edge[ci] = true;
               d = new_bits_[ci].data();
 #pragma omp atomic
               d[a_w] = d[a_w] | a_b;
@@ -281,29 +284,29 @@ class Buffered_SBWT {
           // The old suffix group leader stays.
           // Give children to old leader.
           for (uint16_t ci = 0; ci < 4; ++ci) {
-            if (buffer[buffer_idx].edge[ci] > 0) {
+            if (buffer_[buffer_idx].edge[ci] > 0) {
               uint64_t* d = new_bits_[ci].data();
 #pragma omp atomic
               d[a_w] = d[a_w] | a_b;
             }
           }
-          buffer[buffer_idx].edge = {0, 0, 0, 0};
-          buffer[buffer_idx].group_head = false;
+          buffer_[buffer_idx].edge = {0, 0, 0, 0};
+          buffer_[buffer_idx].group_head = false;
         }
       }
       // If the buffer element has no predecessor in buffer, the incoming edge
       // needs to either be added to an existing predecessor in sbwt or a new
       // dummy path needs to be created
-      if (buffer[buffer_idx].b_pred == false) {
-        if (buffer[buffer_idx].pred_size > 0) {
-          uint64_t a_w = a / 64;
-          uint64_t a_b = ONE << (a % 64);
-          uint64_t* d = new_bits_[buffer[buffer_idx].kmer.get_v(k - 1)].data();
+      if (buffer_[buffer_idx].b_pred == false) {
+        if (buffer_[buffer_idx].pred_size > 0) {
+          uint64_t a_w = buffer_[buffer_idx].b_pred / 64;
+          uint64_t a_b = ONE << (buffer_[buffer_idx].b_pred % 64);
+          uint64_t* d = new_bits_[buffer_[buffer_idx].kmer.get_v(k - 1)].data();
 #pragma omp atomic
           d[a_w] = d[a_w] < a_b;
         } else {
 #pragma omp critical
-          { dummies.add(buffer[buffer_idx].kmer, *this); }
+          { dummies.add(buffer_[buffer_idx].kmer, *this); }
         }
       }
     }
@@ -322,14 +325,14 @@ class Buffered_SBWT {
 
     uint64_t o_size = n_nodes_;
     uint64_t n_size =
-        o_size + buffer.size() + addables.size() - removables.size();
+        o_size + buffer_.size() + addables.size() - removables.size();
     for (uint16_t i = 0; i < 4; ++i) {
       bits_[i].bit_resize(n_size);
     }
     suffix_group_starts_.bit_resize(n_size);
 
     n_nodes_ = n_size;
-    n_kmers_ += buffer.size();
+    n_kmers_ += buffer_.size();
 
     uint64_t buffer_index = 0;
     uint64_t sbwt_index = 0;
@@ -337,13 +340,13 @@ class Buffered_SBWT {
     uint64_t r_dummy_index = 0;
     uint64_t write_index = 0;
     uint64_t next_i = std::min(
-        {buffer.size() > 0 ? buffer[buffer_index].source : n_size,
+        {buffer_.size() > 0 ? buffer_[buffer_index].source : n_size,
          addables.size() > 0 ? addables[dummy_index].sbwt_index : n_size,
          removables.size() > 0 ? removables[r_dummy_index] : n_size});
-    while (buffer_index < buffer.size() || sbwt_index < o_size ||
+    while (buffer_index < buffer_.size() || sbwt_index < o_size ||
            dummy_index < addables.size()) {
-      if (buffer_index < buffer.size()) {
-        auto be = buffer[buffer_index];
+      if (buffer_index < buffer_.size()) {
+        auto be = buffer_[buffer_index];
         if (be.source == sbwt_index) {
           if (dummy_index < addables.size()) {
             auto nd = addables[dummy_index];
@@ -355,8 +358,8 @@ class Buffered_SBWT {
               ++dummy_index;
               ++write_index;
               next_i = std::min(
-                  {buffer.size() > buffer_index ? buffer[buffer_index].source
-                                                : o_size,
+                  {buffer_.size() > buffer_index ? buffer_[buffer_index].source
+                                                 : o_size,
                    addables.size() > dummy_index
                        ? addables[dummy_index].sbwt_index
                        : o_size,
@@ -372,8 +375,8 @@ class Buffered_SBWT {
           ++buffer_index;
           ++write_index;
           next_i = std::min(
-              {buffer.size() > buffer_index ? buffer[buffer_index].source
-                                            : o_size,
+              {buffer_.size() > buffer_index ? buffer_[buffer_index].source
+                                             : o_size,
                addables.size() > dummy_index ? addables[dummy_index].sbwt_index
                                              : o_size,
                removables.size() > r_dummy_index ? removables[r_dummy_index]
@@ -391,8 +394,8 @@ class Buffered_SBWT {
           ++dummy_index;
           ++write_index;
           next_i = std::min(
-              {buffer.size() > buffer_index ? buffer[buffer_index].source
-                                            : o_size,
+              {buffer_.size() > buffer_index ? buffer_[buffer_index].source
+                                             : o_size,
                addables.size() > dummy_index ? addables[dummy_index].sbwt_index
                                              : o_size,
                removables.size() > r_dummy_index ? removables[r_dummy_index]
@@ -405,8 +408,8 @@ class Buffered_SBWT {
         ++r_dummy_index;
         ++sbwt_index;
         next_i = std::min(
-            {buffer.size() > buffer_index ? buffer[buffer_index].source
-                                          : o_size,
+            {buffer_.size() > buffer_index ? buffer_[buffer_index].source
+                                           : o_size,
              addables.size() > dummy_index ? addables[dummy_index].sbwt_index
                                            : o_size,
              removables.size() > r_dummy_index ? removables[r_dummy_index]
@@ -454,7 +457,7 @@ class Buffered_SBWT {
     }
 
     compute_k_mer_precalc();
-    buffer.clear();
+    buffer_.clear();
   }
 
  public:
@@ -490,141 +493,152 @@ class Buffered_SBWT {
   Buffered_SBWT& operator=(Buffered_SBWT&&) = delete;
   Buffered_SBWT& operator=(Buffered_SBWT) = delete;
 
-  uint64_t serialize(const std::string& file) const {
-    throwing_ofstream out(file, ios::binary);
-    return serialize(out);
+  template <class OS>
+  uint64_t serialize(OS& out_stream) const {
+    if constexpr (std::is_same_v<std::string, OS>) {
+      throwing_ofstream out(out_stream, ios::binary);
+      return serialize(out);
+    } else {
+      uint64_t written = 0;
+      written += serialize_string(SBWT_VERSION, out_stream);
+      for (uint16_t i = 0; i < 4; ++i) {
+        written += bits_[i].serialize(out_stream.stream);
+        written += rank_supports_[i].serialize(out_stream.stream);
+      }
+      written += suffix_group_starts_.serialize(out_stream.stream);
+      written += serialize_std_array(c_table_, out_stream);
+      written += serialize_std_vector(kmer_prefix_precalc_, out_stream);
+      out_stream.write(reinterpret_cast<const char*>(&n_nodes_), sizeof(n_nodes_));
+      written += sizeof(n_nodes_);
+      out_stream.write(reinterpret_cast<const char*>(&n_kmers_), sizeof(n_kmers_));
+      written += sizeof(n_kmers_);
+      uint16_t l_k = k;
+      out_stream.write(reinterpret_cast<char*>(&l_k), sizeof(l_k));
+      written += sizeof(l_k);
+      return written;
+    }
   }
 
   template <class OS>
-  uint64_t serialize(OS& out_stream) const {
-    uint64_t written = 0;
-    written += serialize_string(SBWT_VERSION, out_stream);
-    for (uint16_t i = 0; i < 4; ++i) {
-      written += bits_[i].serialize(out_stream);
-      written += rank_supports_[i].serialize(out_stream);
-    }
-    written += suffix_group_starts_.serialize(out_stream);
-    written += serialize_std_array(c_table_, out_stream);
-    written += serialize_std_vector(kmer_prefix_precalc_, out_stream);
-    out_stream.write(reinterpret_cast<char*>(&n_nodes_), sizeof(n_nodes_));
-    written += sizeof(n_nodes_);
-    out_stream.write(reinterpret_cast<char*>(&n_kmers_), sizeof(n_kmers_));
-    written += sizeof(n_kmers_);
-    uint16_t l_k = k;
-    out_stream.write(reinterpret_cast<char*>(&l_k), sizeof(l_k));
-    written += sizeof(l_k);
-    return written;
-  }
-
-  uint64_t serialize_old_format(const std::string& file) const {
-    throwing_ofstream out(file, ios::binary);
-    return serialize_old_format(out);
-  }
-
-  template<class OS>
   uint64_t serialize_old_format(OS& out_stream) const {
-    uint64_t written = 0;
-    written += serialize_string(SBWT_VARIANT, out_stream);
-    std::string old_version = "v0.1";
-    written += serialize_string(old_version, out_stream);
-    for (uint16_t i = 0; i < 4; ++i) {
-        bits_[i].serialize(out_stream);
-    }
-    for (uint16_t i = 0; i < 4; ++i) {
-        rank_supports_[i].serialize(out_stream);
-    }
-    written += suffix_group_starts_.serialize(out_stream);
-    std::vector<uint64_t> C;
-    for (uint16_t i = 0; i < 4; ++i) {
+    if constexpr (std::is_same_v<std::string, OS>) {
+      throwing_ofstream out(out_stream, ios::binary);
+      return serialize_old_format(out);
+    } else {
+      uint64_t written = 0;
+      written += serialize_string(SBWT_VARIANT, out_stream);
+      std::string old_version = "v0.1";
+      written += serialize_string(old_version, out_stream);
+      for (uint16_t i = 0; i < 4; ++i) {
+        bits_[i].serialize(out_stream.stream);
+      }
+      for (uint16_t i = 0; i < 4; ++i) {
+        rank_supports_[i].serialize(out_stream.stream);
+      }
+      written += suffix_group_starts_.serialize(out_stream.stream);
+      std::vector<uint64_t> C;
+      for (uint16_t i = 0; i < 4; ++i) {
         C.push_back(c_table_[i]);
+      }
+      written += serialize_std_vector(C, out_stream);
+      std::vector<std::pair<int64_t, int64_t>> old_precalc;
+      for (auto P : kmer_prefix_precalc_) {
+        std::pair<int64_t, int64_t> upd_P(P);
+        std::pair<int64_t, int64_t> unfound_P = {-1, -1};
+        old_precalc.push_back(P.first == P.second ? unfound_P : upd_P);
+      }
+      written += serialize_std_vector(old_precalc, out_stream);
+      int64_t writable_v = precalc_k;
+      out_stream.write(reinterpret_cast<char*>(&writable_v),
+                       sizeof(writable_v));
+      written += sizeof(writable_v);
+
+      writable_v = n_nodes_;
+      out_stream.write(reinterpret_cast<char*>(&writable_v),
+                       sizeof(writable_v));
+      written += sizeof(writable_v);
+
+      writable_v = n_kmers_;
+      out_stream.write(reinterpret_cast<char*>(&writable_v),
+                       sizeof(writable_v));
+      written += sizeof(writable_v);
+
+      writable_v = k;
+      out_stream.write(reinterpret_cast<char*>(&writable_v),
+                       sizeof(writable_v));
+      written += sizeof(writable_v);
+
+      return written;
     }
-    written += serialize_std_vector(C, out_stream);
-    std::vector<std::pair<int64_t, int64_t>> old_precalc;
-    for (auto P : kmer_prefix_precalc_) {
-        old_precalc.push_back(P.first == P.second ? {-1, -1}, {P.first, P.second - 1});
-    }
-    written += serialize_std_vector(old_precalc, out_stream);
-    int64_t writable_v = precalc_k;
-    out_stream.write(reinterpret_cast<char*>(&writable_v), sizeof(writable_v));
-    written += sizeof(writable_v);
-
-    writable_v = n_nodes_;
-    out_stream.write(reinterpret_cast<char*>(&writable_v), sizeof(writable_v));
-    written += sizeof(writable_v);
-
-    writable_v = n_kmers_;
-    out_stream.write(reinterpret_cast<char*>(&writable_v), sizeof(writable_v));
-    written += sizeof(writable_v);
-
-    writable_v = k;
-    out_stream.write(reinterpret_cast<char*>(&writable_v), sizeof(writable_v));
-    written += sizeof(writable_v);
-
-    return written;
-  }
-
-  void load(const std::string& file) {
-    throwing_ifstream in(file, ios::binary);
-    load(in);
   }
 
   template <class IS>
   void load(IS& in_stream) {
-    std::string var = load_string(in_stream);
-    if (var == SBWT_VERSION) {
-      for (uint16_t i = 0; i < 4; ++i) {
-        bits_[i].load(in_stream);
-        rank_supports_[i].load(in_stream, &(bits_[i]));
-      }
-      suffix_group_starts_.load(in_stream);
-      load_std_array(c_table_, in_stream);
-      load_std_vector(kmer_prefix_precalc_, in_stream);
-      is.read(reinterpret_cast<char*>(&n_nodes_), sizeof(n_nodes_));
-      is.read(reinterpret_cast<char*>(&n_kmers_), sizeof(n_kmers_));
-      uint16_t t_k;
-      is.read(reinterpret_cast<char*>(&t_k), sizeof(t_k));
-      if (t_k != k) {
-        throw std::runtime_error(
-            "Attempt to load sbwt with the wrong value for k")
-      }
-    } else if (var == SBWT_VARIANT) {
-      var = load_string(in_stream);
-      if (var == "v0.1") {
+    if constexpr (std::is_same_v<std::string, IS>) {
+      throwing_ifstream in(in_stream, ios::binary);
+      load(in);
+    } else {
+      std::string var = load_string(in_stream);
+      if (var == SBWT_VERSION) {
         for (uint16_t i = 0; i < 4; ++i) {
-          bits_[i].load(in_stream);
+          bits_[i].load(in_stream.stream);
+          rank_supports_[i].load(in_stream.stream, &(bits_[i]));
         }
-        for (uint16_t i = 0; i < 4; ++i) {
-          rank_supports_[i].load(in_stream, &(bits_[i]));
-        }
-        suffix_group_starts_.load(in_stream);
-        std::array<uint64_t, 4> t_arr;
-        load_std_array(t_arr, in_stream);
-        for (uint16_t i = 0; i < 4; ++i) {
-          c_table_[i] = t_arr[i];
-        }
-        c_table_[4] = bits_[0].size();
+        suffix_group_starts_.load(in_stream.stream);
+        load_std_array(c_table_, in_stream);
         load_std_vector(kmer_prefix_precalc_, in_stream);
-        int64_t t_p_k is.read(reinterpret_cast<char*>(&t_p_k), sizeof(t_p_k));
-        is.read(reinterpret_cast<char*>(&n_nodes_), sizeof(n_nodes_));
-        is.read(reinterpret_cast<char*>(&n_kmers_), sizeof(n_kmers_));
-        int64_t t_k;
-        is.read(reinterpret_cast<char*>(&t_k), sizeof(t_k));
+        in_stream.read(reinterpret_cast<char*>(&n_nodes_), sizeof(n_nodes_));
+        in_stream.read(reinterpret_cast<char*>(&n_kmers_), sizeof(n_kmers_));
+        uint16_t t_k;
+        in_stream.read(reinterpret_cast<char*>(&t_k), sizeof(t_k));
         if (t_k != k) {
           throw std::runtime_error(
-              "Attempt to load sbwt with the wrong value for k")
+              "Attempt to load sbwt with the wrong value for k");
         }
-        compute_k_mer_precalc();
+      } else if (var == SBWT_VARIANT) {
+        var = load_string(in_stream);
+        if (var == "v0.1") {
+          for (uint16_t i = 0; i < 4; ++i) {
+            bits_[i].load(in_stream.stream);
+          }
+          for (uint16_t i = 0; i < 4; ++i) {
+            rank_supports_[i].load(in_stream.stream, &(bits_[i]));
+          }
+          suffix_group_starts_.load(in_stream.stream);
+          std::array<uint64_t, 4> t_arr;
+          load_std_array(t_arr, in_stream);
+          for (uint16_t i = 0; i < 4; ++i) {
+            c_table_[i] = t_arr[i];
+          }
+          c_table_[4] = bits_[0].size();
+          load_std_vector(kmer_prefix_precalc_, in_stream);
+          int64_t t_p_k;
+          in_stream.read(reinterpret_cast<char*>(&t_p_k), sizeof(t_p_k));
+          in_stream.read(reinterpret_cast<char*>(&n_nodes_), sizeof(n_nodes_));
+          in_stream.read(reinterpret_cast<char*>(&n_kmers_), sizeof(n_kmers_));
+          int64_t t_k;
+          in_stream.read(reinterpret_cast<char*>(&t_k), sizeof(t_k));
+          if (t_k != k) {
+            throw std::runtime_error(
+                "Attempt to load sbwt with the wrong value for k");
+          }
+          if (t_p_k != precalc_k) {
+            throw std::runtime_error(
+                "Attempt to load sbwt with the wrong value for precalc_k");
+          }
+          compute_k_mer_precalc();
+        } else {
+          throw std::runtime_error("Invalid version string or corrupted SBWT");
+        }
       } else {
-        throw std::runtime_error("Invalid version string or corrupted SBWT");
+        throw std::runtime_error("Invalid variant/version or corrupted SBWT");
       }
-    } else {
-      throw std::runtime_error("Invalid variant/version or corrupted SBWT")
     }
   }
 
   void add(std::string& addable) {
-    add_string(addable, buffer, false);
-    if (buffer.size() == 0) {
+    add_string(addable, buffer_, false);
+    if (buffer_.size() == 0) {
       return;
     }
     commit();
@@ -660,8 +674,8 @@ class Buffered_SBWT {
             if (addable_k_mers.size() > 0) {
 #pragma omp critical
               {
-                buffer.insert(buffer.end(), addable_k_mers.begin(),
-                              addable_k_mers.end());
+                buffer_.insert(buffer_.end(), addable_k_mers.begin(),
+                               addable_k_mers.end());
               }
             }
             break;
@@ -670,7 +684,7 @@ class Buffered_SBWT {
 #pragma omp atomic
           k_mer_count = k_mer_count + addable_k_mers.size();
 
-          if (k_mer_count >= buffer_limit) {
+          if (k_mer_count >= buffer_limit_) {
             if (addable_k_mers.size() > 0) {
               std::sort(addable_k_mers.begin(), addable_k_mers.end());
               uint64_t trg = 0;
@@ -683,15 +697,15 @@ class Buffered_SBWT {
               addable_k_mers.resize(trg);
 #pragma omp critical
               {
-                buffer.insert(buffer.end(), addable_k_mers.begin(),
-                              addable_k_mers.end());
+                buffer_.insert(buffer_.end(), addable_k_mers.begin(),
+                               addable_k_mers.end());
               }
             }
             break;
           }
         }
       }
-      if (buffer.size() >= buffer_limit) {
+      if (buffer_.size() >= buffer_limit_) {
         commit();
 #ifdef DEBUG
         if (not is_valid()) {
@@ -700,7 +714,7 @@ class Buffered_SBWT {
 #endif
       }
     }
-    if (buffer.size() > 0) {
+    if (buffer_.size() > 0) {
       commit();
 #ifdef DEBUG
       if (not is_valid()) {
@@ -790,6 +804,51 @@ class Buffered_SBWT {
     }
     return ok;
   }
+
+  void compare(const Buffered_SBWT& other) const {
+    if (n_kmers_ != other.n_kmers_) {
+      std::cerr << "k-mer count missmatch: " << n_kmers_
+                << " != " << other.n_kmers_ << std::endl;
+      exit(1);
+    }
+    if (n_nodes_ != other.n_nodes_) {
+      std::cerr << "node count (dummy count) missmatch: " << n_nodes_
+                << " != " << other.n_nodes_ << std::endl;
+      exit(1);
+    }
+    const std::array<char, 4> alpha = {'A', 'C', 'G', 'T'};
+    for (uint16_t i = 0; i < 4; ++i) {
+      if (bits_[i].size() != other.bits_[0].size()) {
+        std::cerr << alpha[i] << " bv size missmatch" << std::endl;
+        exit(1);
+      }
+      if (bits_[i] != other.bits_[i]) {
+        std::cerr << alpha[i] << " bv content missmatch" << std::endl;
+        exit(1);
+      }
+    }
+    if (suffix_group_starts_.size() != other.suffix_group_starts_.size()) {
+      std::cerr << "Suffix group start bv size missmatch" << std::endl;
+      exit(1);
+    }
+    if (suffix_group_starts_ != other.suffix_group_starts_) {
+      std::cerr << "Suffix group start bv content missmatch" << std::endl;
+      exit(1);
+    }
+    if (kmer_prefix_precalc_.size() != other.kmer_prefix_precalc_.size()) {
+      std::cerr << "Precalc kmer count missmatch" << std::endl;
+    }
+    for (uint64_t i = 0; i < kmer_prefix_precalc_.size(); ++i) {
+      if (kmer_prefix_precalc_[i] != other.kmer_prefix_precalc_[i]) {
+        std::cerr << "Precalc kmer " << i << " missmatch:\n"
+                  << "(" << kmer_prefix_precalc_[i].first << ", "
+                  << kmer_prefix_precalc_[i].second << ") <-> ("
+                  << other.kmer_prefix_precalc_[i].first << ", "
+                  << other.kmer_prefix_precalc_[i].second << ")" << std::endl;
+        exit(1);
+      }
+    }
+  }
 };
 
 template <uint16_t k, uint16_t precalc_k>
@@ -805,7 +864,7 @@ class Buffered_SBWT<k, precalc_k>::Streaming_search {
   bool found_ = false;
 
  public:
-  Streaming_search(const std::string& searchable, const Buffered_sbwt& bsbwt)
+  Streaming_search(const std::string& searchable, const Buffered_SBWT& bsbwt)
       : static_bsbwt_(bsbwt), searchable_(searchable), kmer_(searchable) {}
 
   bool next(uint64_t& idx, bool& found) {
@@ -835,7 +894,7 @@ class Buffered_SBWT<k, precalc_k>::Streaming_search {
       loc_ = a;
       found_ = a < b;
     } else {
-      auto precalc_idx = kmer_.get_first_v<precalc_k>();
+      auto precalc_idx = kmer_.template get_first_v<precalc_k>();
       auto p = static_bsbwt_.kmer_prefix_precalc_[precalc_idx];
       uint64_t a = p.first;
       uint64_t b = p.second + 1;
@@ -858,7 +917,7 @@ class Buffered_SBWT<k, precalc_k>::Streaming_search {
   }
 
   bool next(uint64_t& pred, uint16_t& pred_size, uint64_t& idx, bool& found,
-            Kkmer<k>& km) {
+            Kmer<k>& km) {
     km = kmer_;
     bool r = next(idx, found);
     pred = pred_;

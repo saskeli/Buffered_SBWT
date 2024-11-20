@@ -139,7 +139,7 @@ class Kmer {
 
   bool operator==(const Kmer& other) const {
     bool ret = this->data_[0] == other.data_[0];
-    for (int64_t i = 1; i < data_.size(); i++) {
+    for (size_t i = 1; i < data_.size(); i++) {
       ret &= this->data_[i] == other.data_[i];
     }
     return ret;
@@ -150,7 +150,7 @@ class Kmer {
   // Strict colexicographic comparison
   // Returns true if this is smaller than the other
   bool operator<(const Kmer& other) const {
-    for (int64_t i = 0; i < data_.size(); i++) {
+    for (size_t i = 0; i < data_.size(); i++) {
       if (this->data_[i] < other.data_[i]) return true;
       if (this->data_[i] > other.data_[i]) return false;
     }

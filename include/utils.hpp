@@ -6,6 +6,8 @@
 #include <vector>
 #include <stdexcept>
 
+#include "throwing_streams.hpp"
+
 namespace sbwt {
 
 template <class out_t>
@@ -31,7 +33,7 @@ template <typename T, class out_t>
 inline uint64_t serialize_std_vector(const std::vector<T>& v, out_t& os) {
   uint64_t n_bytes = sizeof(T) * v.size();
   os.write(reinterpret_cast<char*>(&n_bytes), sizeof(n_bytes));
-  os.write(reinterpret_cast<char*>(v.data()), n_bytes);
+  os.write(reinterpret_cast<const char*>(v.data()), n_bytes);
   return sizeof(n_bytes) + n_bytes;
 }
 
@@ -52,19 +54,29 @@ template <typename AT, class out_t>
 inline uint64_t serialize_std_array(const AT& a, out_t& os) {
   uint64_t n_bytes = sizeof(AT);
   os.write(reinterpret_cast<char*>(&n_bytes), sizeof(n_bytes));
-  os.write(reinterpret_cast<char*>(a.data()), sizeof(AT));
+  os.write(reinterpret_cast<const char*>(a.data()), sizeof(AT));
   return sizeof(AT) + sizeof(n_bytes);
 }
 
 template <typename AT, class in_t>
 inline void load_std_array(AT& a, in_t& is) {
   uint64_t n_bytes = 0;
-  is.read(reinterpret_cast<char*>&n_bytes, sizeof(n_bytes));
-  assert(n_bytes % sizeof(T) == 0);
-  if (n_bytes / sizeof(T) != a.size()) {
+  is.read(reinterpret_cast<char*>(&n_bytes), sizeof(n_bytes));
+  if (sizeof(AT) != n_bytes) {
     throw std::runtime_error("Invalid array size");
   }
   is.read(reinterpret_cast<char*>(a.data()), sizeof(AT));
 }
+
+inline std::vector<std::string> readlines(const std::string& filename) {
+    std::vector<std::string> lines;
+    std::string line;
+    throwing_ifstream in(filename);
+    while(getline(in.stream,line)){
+        lines.push_back(line);
+    }
+    return lines;
+}
+
 
 }  // namespace sbwt

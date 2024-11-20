@@ -1,10 +1,13 @@
 #pragma once
 
-#include <string>
 #include <cstdint>
+#include <string>
 
-#include "SeqIO/buffered_streams.hh"
+#include "SeqIO/SeqIO.hh"
 
+namespace sbwt {
+
+template <uint16_t k>
 class io_container {
  private:
   seq_io::Multi_File_Reader<> reader;
@@ -62,3 +65,4 @@ class io_container {
     }
   }
 };
+}  // namespace sbwt
