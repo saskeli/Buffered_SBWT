@@ -44,14 +44,16 @@ void comp(std::string a, std::string b) {
   buf_t bufb(b);
   if (not bufa.is_valid()) {
     std::cerr << a << " validation failed" << std::endl;
-    exit(1);
   }
   if (not bufb.is_valid()) {
     std::cerr << b << " validation failed" << std::endl;
+  }
+  if (bufa.compare(bufb)) {
+    std::cout << "All is fine?" << std::endl;
+  } else {
+    std::cout << "Is broken!" << std::endl;
     exit(1);
   }
-  bufa.compare(bufb);
-  std::cout << "All is fine?" << std::endl;
 }
 
 void add_files(std::string input_path, std::string output_path,
@@ -97,8 +99,7 @@ void add_files(std::string input_path, std::string output_path,
 
 #ifdef DEBUG
   if (not buf.is_valid()) {
-    std::cerr << "Validation fail... Terminating" << std::endl;
-    exit(1);
+    std::cerr << "Validation fail!" << std::endl;
   }
 #endif
   if (old_output_format) [[unlikely]] {
@@ -123,7 +124,8 @@ int main(int argc, char const* argv[]) {
     if (std::strstr(argv[i], "-h")) {
       help(argv[0]);
       exit(0);
-    } if (std::strstr(argv[i], "-r")) {
+    }
+    if (std::strstr(argv[i], "-r")) {
       rev_comp = true;
     } else if (std::strstr(argv[i], "--old_format")) {
       output_old_format = true;

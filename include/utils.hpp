@@ -43,7 +43,11 @@ inline void load_std_vector(std::vector<T>& v, in_t& is) {
   is.read(reinterpret_cast<char*>(&n_bytes), sizeof(n_bytes));
   assert(n_bytes % sizeof(T) == 0);
   if (n_bytes / sizeof(T) != v.size()) {
-    throw std::runtime_error("Invalid vector size");
+    std::string err_str = "Invalid vector size. Expected ";
+    err_str.append(std::to_string(v.size())).append(" elems, ");
+    err_str.append(std::to_string(sizeof(T) * v.size())).append(" bytes. Got ");
+    err_str.append(std::to_string(n_bytes)).append(" bytes.");
+    throw std::runtime_error(err_str);
   }
   is.read(reinterpret_cast<char*>(v.data()), n_bytes);
 }
@@ -63,7 +67,11 @@ inline void load_std_array(AT& a, in_t& is) {
   uint64_t n_bytes = 0;
   is.read(reinterpret_cast<char*>(&n_bytes), sizeof(n_bytes));
   if (sizeof(AT) != n_bytes) {
-    throw std::runtime_error("Invalid array size");
+    std::string err_str = "Invalid array size. Expected ";
+    err_str.append(std::to_string(a.size())).append(" elems, ");
+    err_str.append(std::to_string(sizeof(AT))).append(" bytes. Got ");
+    err_str.append(std::to_string(n_bytes)).append(" bytes.");
+    throw std::runtime_error(err_str);
   }
   is.read(reinterpret_cast<char*>(a.data()), sizeof(AT));
 }

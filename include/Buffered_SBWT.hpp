@@ -42,6 +42,20 @@ class Buffered_SBWT {
     bool b_pred = false;
 
     bool operator<(const B_elem& rhs) const { return kmer < rhs.kmer; }
+
+    std::string to_string() {
+      std::string sb = kmer.to_string();
+      sb.append(" ");
+      for (auto e : edge) {
+        sb.append(e ? "1" : "0").append(" ");
+      }
+      sb.append(std::to_string(source)).append("\n");
+      sb.append("    ").append(std::to_string(pred)).append(" ");
+      sb.append(std::to_string(pred + pred_size)).append(", ");
+      sb.append(std::to_string(group_head)).append(", ");
+      sb.append(std::to_string(b_pred));
+      return sb;
+    }
   };
 
   static_assert(k > 0);
@@ -53,7 +67,6 @@ class Buffered_SBWT {
   std::array<sdsl::rank_support_v5<>, 4> rank_supports_;
   std::array<sdsl::bit_vector, 4> new_bits_;
   sdsl::bit_vector suffix_group_starts_;
-  sdsl::bit_vector new_suffix_groups_;
   std::array<uint64_t, 5> c_table_;
   std::vector<std::pair<uint64_t, uint64_t>> kmer_prefix_precalc_;
   std::vector<B_elem> buffer_;
@@ -88,16 +101,13 @@ class Buffered_SBWT {
     uint64_t a = 0;
     uint64_t b = n_nodes_;
     if constexpr (end - start > precalc_k) {
-      KM_t s_km = kmer;
-      for (uint16_t i = 0; i < start; ++i) {
-        s_km = s_km.suf();
-      }
-      auto precalc_idx = s_km.template get_first_v<precalc_k>();
+      auto precalc_idx = kmer.template get_first_v<precalc_k + start>();
+      precalc_idx >>= 2 * start;
       auto I = kmer_prefix_precalc_[precalc_idx];
       a = I.first;
       b = I.second;
-      for (uint16_t i = precalc_k; i < end - start; ++i) {
-        fl(a, b, s_km.get_v(i));
+      for (uint16_t i = precalc_k + start; i < end; ++i) {
+        fl(a, b, kmer.get_v(i));
         if constexpr (short_circuit) {
           if (b <= a) {
             return {0, 0};
@@ -229,19 +239,23 @@ class Buffered_SBWT {
   }
 
   void commit() {
+#ifdef DEBUG
+    std::cerr << "Commit " << n_nodes_ << " with " << buffer_.size()
+              << " new k-mers" << std::endl;
+#endif
     setup_buffer();
     compute_buffer_edges();
     Dummy_trie dummies(*this);
+#ifdef VERBOSE
+    uint64_t v_last = 0;
+#endif
 #pragma omp parallel for
     for (uint64_t buffer_idx = 0; buffer_idx < buffer_.size(); ++buffer_idx) {
-      if (buffer_[buffer_idx].group_head == false) {
-        continue;
-      }
       // TODO: Given a suffix group bv, potential location, and predecessor
       // suffix group, can this be done better?
-      auto I = search_kmer<Kmer_t, k, 1>(buffer_[buffer_idx].kmer);
+      auto I = search_kmer<Kmer_t, k, 1, false>(buffer_[buffer_idx].kmer);
       // This (I) is the suffix group in the static_sbwt.
-      // If the suffix group is empty {-1, -1}, then the k-mer
+      // If the suffix group is empty (I.first == I.second), then the k-mer
       //  will be its own suffix group, unless there is another
       //  element with the same suffix in the buffer.
       // Else the element is part of an existing suffix group.
@@ -251,7 +265,7 @@ class Buffered_SBWT {
       //  dummy, could be the descendent of some other node, making the
       //  dummy superfluous, which is a contradiction, since dummies are
       //  only added if needed.
-      if (I.first != I.second) {
+      if (I.first != I.second && buffer_[buffer_idx].group_head) {
         uint64_t a = I.first;  // Suffix group leader.
         uint64_t a_w = a / 64;
         uint64_t a_b = uint64_t(1) << (a % 64);
@@ -299,29 +313,48 @@ class Buffered_SBWT {
       // dummy path needs to be created
       if (buffer_[buffer_idx].b_pred == false) {
         if (buffer_[buffer_idx].pred_size > 0) {
-          uint64_t a_w = buffer_[buffer_idx].b_pred / 64;
-          uint64_t a_b = ONE << (buffer_[buffer_idx].b_pred % 64);
-          uint64_t* d = new_bits_[buffer_[buffer_idx].kmer.get_v(k - 1)].data();
+          uint64_t w_index = buffer_[buffer_idx].pred;
+          uint64_t a_w = w_index / 64;
+          uint64_t a_b = ONE << (w_index % 64);
+          uint16_t transition_char = buffer_[buffer_idx].kmer.get_v(k - 1);
+          uint64_t* d = new_bits_[transition_char].data();
 #pragma omp atomic
-          d[a_w] = d[a_w] < a_b;
+          d[a_w] = d[a_w] | a_b;
         } else {
 #pragma omp critical
           { dummies.add(buffer_[buffer_idx].kmer, *this); }
         }
       }
+#ifdef VERBOSE
+      for (uint64_t p_i = v_last; p_i <= buffer_idx; ++p_i) {
+        std::cerr << p_i << ": " << buffer_[p_i].to_string() << std::endl;
+      }
+      v_last = buffer_idx + 1;
+#endif
     }
 
     std::vector<uint64_t> removables;
     std::vector<typename decltype(dummies)::Dummy_trie_node> addables;
     dummies.update_removals(removables, addables, *this);
 
-#pragma omp parallel for
-    for (uint16_t i = 0; i < 4; ++i) {
-      new_bits_[0] ^= bits_[0];
+#ifdef VERBOSE
+    std::cerr << "Removable dummy indexes: " << std::endl;
+    for (auto rd : removables) {
+      std::cerr << rd << std::endl;
     }
 
-    sdsl::bit_vector old_starts;
-    old_starts = suffix_group_starts_;
+    std::cerr << "Addable dummies: " << std::endl;
+    for (auto ad : addables) {
+      std::cerr << ad.to_string() << std::endl;
+    }
+#endif
+
+#pragma omp parallel for
+    for (uint16_t i = 0; i < 4; ++i) {
+      new_bits_[i] ^= bits_[i];
+    }
+
+    sdsl::bit_vector old_starts = suffix_group_starts_;
 
     uint64_t o_size = n_nodes_;
     uint64_t n_size =
@@ -330,6 +363,28 @@ class Buffered_SBWT {
       bits_[i].bit_resize(n_size);
     }
     suffix_group_starts_.bit_resize(n_size);
+
+#ifdef DEBUG
+    uint64_t total_compute = 0;
+    for (uint16_t ci = 0; ci < 4; ++ci) {
+      for (uint64_t i = 0; i < n_nodes_; ++i) {
+        total_compute += new_bits_[ci][i];
+      }
+      for (auto be : buffer_) {
+        total_compute += be.edge[ci] > 0;
+      }
+      for (auto de : addables) {
+        total_compute += de.out[ci] > 0;
+      }
+      for (auto de : removables) {
+        total_compute -= new_bits_[ci][de];
+      }
+    }
+    if (total_compute != n_size - 1) {
+      std::cerr << "Pre-merge edge count missmatch, should be " << n_size - 1
+                << " is " << total_compute << std::endl;
+    }
+#endif
 
     n_nodes_ = n_size;
     n_kmers_ += buffer_.size();
@@ -351,10 +406,19 @@ class Buffered_SBWT {
           if (dummy_index < addables.size()) {
             auto nd = addables[dummy_index];
             if (nd.sbwt_index == sbwt_index && nd.kmer <= be.kmer) {
+#ifdef VERBOSE
+              std::cout << write_index << " D:";
+#endif
               for (uint16_t i = 0; i < 4; ++i) {
                 bits_[i][write_index] = nd.out[i];
+#ifdef VERBOSE
+                std::cout << " " << int(nd.out[i]);
+#endif
               }
               suffix_group_starts_[write_index] = true;
+#ifdef VERBOSE
+              std::cout << " " << true << std::endl;
+#endif
               ++dummy_index;
               ++write_index;
               next_i = std::min(
@@ -368,10 +432,20 @@ class Buffered_SBWT {
               continue;
             }
           }
+#ifdef VERBOSE
+          std::cout << write_index
+                    << " B:";
+#endif
           for (uint16_t i = 0; i < 4; ++i) {
             bits_[i][write_index] = be.edge[i];
+#ifdef VERBOSE
+            std::cout << " " << int(be.edge[i]);
+#endif
           }
           suffix_group_starts_[write_index] = be.group_head;
+#ifdef VERBOSE
+          std::cout << " " << int(be.group_head) << std::endl;
+#endif
           ++buffer_index;
           ++write_index;
           next_i = std::min(
@@ -387,10 +461,19 @@ class Buffered_SBWT {
       if (dummy_index < addables.size()) {
         auto nd = addables[dummy_index];
         if (nd.sbwt_index == sbwt_index) {
+#ifdef VERBOSE
+          std::cout << write_index << "A:";
+#endif
           for (uint16_t i = 0; i < 4; ++i) {
             bits_[i][write_index] = nd.out[i];
+#ifdef VERBOSE
+            std::cout << " " << int(nd.out[i]);
+#endif
           }
           suffix_group_starts_[write_index] = true;
+#ifdef VERBOSE
+          std::cout << " " << true << std::endl;
+#endif
           ++dummy_index;
           ++write_index;
           next_i = std::min(
@@ -431,20 +514,35 @@ class Buffered_SBWT {
           new_bits_[0].data() + r, new_bits_[1].data() + r,
           new_bits_[2].data() + r, new_bits_[3].data() + r};
       uint64_t* s_r_ptr = old_starts.data() + r;
+#ifdef VERBOSE
+      std::cout << write_index << ", " << copy_count << ":\n";
+#endif
       while (copy_count > 64) {
         for (uint16_t i = 0; i < 4; ++i) {
           w = sdsl::bits::read_int(r_ptr[i]++, r_o);
+#ifdef VERBOSE
+          std::cout << " " << w;
+#endif
           sdsl::bits::write_int(w_ptr[i]++, w, w_o);
         }
         w = sdsl::bits::read_int(s_r_ptr++, r_o);
+#ifdef VERBOSE
+        std::cout << " " << w << std::endl;
+#endif
         sdsl::bits::write_int(s_w_ptr++, w, w_o);
         copy_count -= 64;
       }
       for (uint16_t i = 0; i < 4; ++i) {
         w = sdsl::bits::read_int(r_ptr[i], r_o, copy_count);
+#ifdef VERBOSE
+        std::cout << " " << w;
+#endif
         sdsl::bits::write_int(w_ptr[i], w, w_o, copy_count);
       }
       w = sdsl::bits::read_int(s_r_ptr, r_o, copy_count);
+#ifdef VERBOSE
+      std::cout << " " << w << " " << copy_count << std::endl;
+#endif
       sdsl::bits::write_int(s_w_ptr, w, w_o, copy_count);
     }
 
@@ -453,11 +551,20 @@ class Buffered_SBWT {
     }
 
     for (uint16_t i = 1; i <= 4; ++i) {
-      c_table_[i] = rank_supports_[i].rank(n_size) + c_table_[i - 1];
+      c_table_[i] = rank_supports_[i - 1].rank(n_size);
+      c_table_[i] += c_table_[i - 1];
     }
 
     compute_k_mer_precalc();
     buffer_.clear();
+    for (uint16_t i = 0; i < 4; ++i) {
+      new_bits_[i].bit_resize(0);
+    }
+#ifdef DEBUG
+    if (not is_valid()) {
+      std::cerr << "Validation fail!" << std::endl;
+    }
+#endif
   }
 
  public:
@@ -466,7 +573,6 @@ class Buffered_SBWT {
         rank_supports_(),
         new_bits_(),
         suffix_group_starts_(1),
-        new_suffix_groups_(1),
         c_table_({1, 1, 1, 1, 1}),
         kmer_prefix_precalc_(ONE << (2 * precalc_k), {1, 1}),
         n_nodes_(1),
@@ -475,6 +581,7 @@ class Buffered_SBWT {
       bits_[i].resize(1);
       sdsl::util::init_support(rank_supports_[i], &bits_[i]);
     }
+    suffix_group_starts_[0] = true;
     buffer_limit_ = gigs_to_belems(buffer_gigs);
   }
 
@@ -508,9 +615,11 @@ class Buffered_SBWT {
       written += suffix_group_starts_.serialize(out_stream.stream);
       written += serialize_std_array(c_table_, out_stream);
       written += serialize_std_vector(kmer_prefix_precalc_, out_stream);
-      out_stream.write(reinterpret_cast<const char*>(&n_nodes_), sizeof(n_nodes_));
+      out_stream.write(reinterpret_cast<const char*>(&n_nodes_),
+                       sizeof(n_nodes_));
       written += sizeof(n_nodes_);
-      out_stream.write(reinterpret_cast<const char*>(&n_kmers_), sizeof(n_kmers_));
+      out_stream.write(reinterpret_cast<const char*>(&n_kmers_),
+                       sizeof(n_kmers_));
       written += sizeof(n_kmers_);
       uint16_t l_k = k;
       out_stream.write(reinterpret_cast<char*>(&l_k), sizeof(l_k));
@@ -642,11 +751,6 @@ class Buffered_SBWT {
       return;
     }
     commit();
-#ifdef DEBUG
-    if (not is_valid()) {
-      exit(1);
-    }
-#endif
   }
 
   template <class addables_t>
@@ -707,20 +811,10 @@ class Buffered_SBWT {
       }
       if (buffer_.size() >= buffer_limit_) {
         commit();
-#ifdef DEBUG
-        if (not is_valid()) {
-          exit(1);
-        }
-#endif
       }
     }
     if (buffer_.size() > 0) {
       commit();
-#ifdef DEBUG
-      if (not is_valid()) {
-        exit(1);
-      }
-#endif
     }
     return total_k_mers;
   }
@@ -749,12 +843,12 @@ class Buffered_SBWT {
   uint16_t get_k() const { return k; }
 
   void print() {
-    std::cout << "SBWT C-table, matrix, suffix group start and prefix "
-                 "precalc intervals."
-              << std::endl;
+    std::cout << "SBWT C-table, matrix, suffix group starts." << std::endl;
+    for (uint16_t i = 0; i <= 4; ++i) {
+      std::cout << c_table_[i] << " ";
+    }
+    std::cout << "<- C-table" << std::endl;
     std::cout << "a c g t    sgs" << std::endl;
-    std::cout << c_table_[1] << " " << c_table_[2] << " " << c_table_[3] << " "
-              << c_table_[4] << " <- C-table" << std::endl;
     for (uint64_t i = 0; i < n_nodes_; ++i) {
       std::cout << bits_[0][i] << " " << bits_[1][i] << " " << bits_[2][i]
                 << " " << bits_[3][i] << "    " << suffix_group_starts_[i]
@@ -793,61 +887,92 @@ class Buffered_SBWT {
                 << std::endl;
       ok = false;
     }
-    c = rank_supports_[0].rank(n);
-    c += rank_supports_[1].rank(n);
-    c += rank_supports_[2].rank(n);
-    c += rank_supports_[3].rank(n);
+    c = 0;
+    for (uint16_t i = 0; i < 4; ++i) {
+      uint64_t rank_count = rank_supports_[i].rank(n);
+      uint64_t raw_count = 0;
+      for (uint64_t ii = 0; ii < n; ++ii) {
+        raw_count += bits_[i][ii];
+      }
+      if (rank_count != raw_count) {
+        std::cerr << i << " bv rank missmatch: rank(" << n
+                  << ") = " << rank_count << ", should be " << raw_count
+                  << std::endl;
+        ok = false;
+      }
+      c += rank_count;
+    }
     if (c != n - 1) {
-      std::cerr << "tree is not. number of edges should be " << n - 1 << ", is "
+      std::cerr << "Tree is not. number of edges should be " << n - 1 << ", is "
                 << c << std::endl;
       ok = false;
     }
     return ok;
   }
 
-  void compare(const Buffered_SBWT& other) const {
+  bool compare(const Buffered_SBWT& other) const {
+    bool is_ok = true;
     if (n_kmers_ != other.n_kmers_) {
       std::cerr << "k-mer count missmatch: " << n_kmers_
                 << " != " << other.n_kmers_ << std::endl;
-      exit(1);
+      is_ok = false;
     }
     if (n_nodes_ != other.n_nodes_) {
       std::cerr << "node count (dummy count) missmatch: " << n_nodes_
                 << " != " << other.n_nodes_ << std::endl;
-      exit(1);
+      is_ok = false;
     }
     const std::array<char, 4> alpha = {'A', 'C', 'G', 'T'};
     for (uint16_t i = 0; i < 4; ++i) {
-      if (bits_[i].size() != other.bits_[0].size()) {
-        std::cerr << alpha[i] << " bv size missmatch" << std::endl;
-        exit(1);
+      if (bits_[i].size() != other.bits_[i].size()) {
+        std::cerr << alpha[i] << " bv size missmatch\n    " << bits_[i].size()
+                  << " != " << other.bits_[i].size() << std::endl;
+        is_ok = false;
       }
-      if (bits_[i] != other.bits_[i]) {
-        std::cerr << alpha[i] << " bv content missmatch" << std::endl;
-        exit(1);
+      for (uint64_t bv_i = 0;
+           bv_i < std::min(bits_[i].size(), other.bits_[i].size()); ++bv_i) {
+        if (bits_[i][bv_i] != other.bits_[i][bv_i]) {
+          std::cerr << alpha[i] << " bv content missmatch at " << bv_i
+                    << std::endl;
+          is_ok = false;
+          break;
+        }
       }
     }
     if (suffix_group_starts_.size() != other.suffix_group_starts_.size()) {
-      std::cerr << "Suffix group start bv size missmatch" << std::endl;
-      exit(1);
+      std::cerr << "Suffix group start bv size missmatch\n    "
+                << suffix_group_starts_.size()
+                << " != " << other.suffix_group_starts_.size() << std::endl;
+      is_ok = false;
     }
     if (suffix_group_starts_ != other.suffix_group_starts_) {
       std::cerr << "Suffix group start bv content missmatch" << std::endl;
-      exit(1);
+      is_ok = false;
     }
     if (kmer_prefix_precalc_.size() != other.kmer_prefix_precalc_.size()) {
-      std::cerr << "Precalc kmer count missmatch" << std::endl;
+      std::cerr << "Precalc kmer count missmatch\n   "
+                << kmer_prefix_precalc_.size()
+                << " != " << other.kmer_prefix_precalc_.size() << std::endl;
     }
+    uint16_t r_count = 0;
+    uint16_t e_limit = 10;
     for (uint64_t i = 0; i < kmer_prefix_precalc_.size(); ++i) {
-      if (kmer_prefix_precalc_[i] != other.kmer_prefix_precalc_[i]) {
+      if (r_count < e_limit &&
+          kmer_prefix_precalc_[i] != other.kmer_prefix_precalc_[i]) {
         std::cerr << "Precalc kmer " << i << " missmatch:\n"
                   << "(" << kmer_prefix_precalc_[i].first << ", "
                   << kmer_prefix_precalc_[i].second << ") <-> ("
                   << other.kmer_prefix_precalc_[i].first << ", "
                   << other.kmer_prefix_precalc_[i].second << ")" << std::endl;
-        exit(1);
+        is_ok = false;
+        ++r_count;
+        if (r_count == e_limit) {
+          std::cerr << "Reported " << e_limit
+                    << " errors before not looking anymore" << std::endl;
+        }
       }
     }
+    return is_ok;
   }
 };
 
@@ -897,7 +1022,7 @@ class Buffered_SBWT<k, precalc_k>::Streaming_search {
       auto precalc_idx = kmer_.template get_first_v<precalc_k>();
       auto p = static_bsbwt_.kmer_prefix_precalc_[precalc_idx];
       uint64_t a = p.first;
-      uint64_t b = p.second + 1;
+      uint64_t b = p.second;
       for (uint16_t i = precalc_k; i < k - 1; ++i) {
         static_bsbwt_.fl(a, b, kmer_.get_v(i));
       }
@@ -942,12 +1067,22 @@ class Buffered_SBWT<k, precalc_k>::Dummy_trie {
       }
       return kmer < rhs.kmer;
     }
+
+    std::string to_string() {
+      std::string ret = std::to_string(kmer_length);
+      ret.append(":").append(kmer.to_string());
+      for (auto o : out) {
+        ret.append(" ").append(std::to_string(o));
+      }
+      ret.append(", ").append(std::to_string(sbwt_index));
+      return ret;
+    }
   };
 
   std::vector<Dummy_trie_node> nodes;
 
  private:
-  void walk(uint64_t index, uint16_t depth, Buffered_SBWT& sbwt) {
+  void walk(uint64_t index, uint16_t depth, const Buffered_SBWT& sbwt) {
     if (depth == k) {
       for (uint16_t i = 0; i < 4; ++i) {
         nodes[index].out[i] = sbwt.bits_[i][nodes[index].sbwt_index];
@@ -972,7 +1107,7 @@ class Buffered_SBWT<k, precalc_k>::Dummy_trie {
   }
 
  public:
-  Dummy_trie(Buffered_SBWT& sbwt) : nodes() {
+  Dummy_trie(const Buffered_SBWT& sbwt) : nodes() {
     nodes.push_back({Kmer<k>(), {0, 0, 0, 0}, 0, 0, true});
     walk(0, 1, sbwt);
   }

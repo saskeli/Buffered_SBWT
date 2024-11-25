@@ -12,6 +12,10 @@ PERF_FLAGS = -Ofast -DNDEBUG
 
 DEBUG_FLAGS = -g -DDEBUG
 
+ifdef VERBOSE
+DEBUG_FLAGS += -DVERBOSE
+endif
+
 INCLUDE = -I include -isystem sdsl-lite/include -isystem SeqIO/include
 
 LIBS = -L sdsl-lite/lib -lsdsl
