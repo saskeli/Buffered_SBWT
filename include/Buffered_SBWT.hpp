@@ -36,9 +36,7 @@ class Buffered_SBWT {
   struct B_elem {
     Kmer_t kmer;
     uint64_t source;
-    uint64_t pred;
     std::array<uint8_t, 4> edge;
-    uint8_t pred_size;
     bool group_head = false;
     bool b_pred = false;
 
@@ -50,11 +48,9 @@ class Buffered_SBWT {
       for (auto e : edge) {
         sb.append(e ? "1" : "0").append(" ");
       }
-      sb.append(std::to_string(source)).append("\n");
-      sb.append("    ").append(std::to_string(pred)).append(" ");
-      sb.append(std::to_string(pred + pred_size)).append(", ");
-      sb.append(std::to_string(group_head)).append(", ");
-      sb.append(std::to_string(b_pred));
+      sb.append(std::to_string(source));
+      sb.append("    ").append(std::to_string(group_head));
+      sb.append(", ").append(std::to_string(b_pred));
       return sb;
     }
   };
@@ -129,15 +125,13 @@ class Buffered_SBWT {
   }
 
   void add_string(const std::string& addable, std::vector<B_elem>& vec) {
-    Streaming_search<false> ss(addable, *this);
+    Streaming_search<true> ss(addable, *this);
     Kmer_t kmer;
-    uint64_t pred_idx;
-    uint16_t pred_size;
     uint64_t loc;
     bool found;
-    while (ss.next(pred_idx, pred_size, loc, found, kmer)) {
+    while (ss.next(loc, found)) {
       if (!found) {
-        vec.push_back({kmer, loc, pred_idx, {0, 0, 0, 0}, uint8_t(pred_size)});
+        vec.push_back({kmer, loc, {0, 0, 0, 0}});
       }
     }
   }
@@ -313,8 +307,17 @@ class Buffered_SBWT {
       // needs to either be added to an existing predecessor in sbwt or a new
       // dummy path needs to be created
       if (buffer_[buffer_idx].b_pred == false) {
-        if (buffer_[buffer_idx].pred_size > 0) {
-          uint64_t w_index = buffer_[buffer_idx].pred;
+        uint64_t a = 0;
+        uint64_t b = n_nodes_;
+        for (uint16_t i = 0; i < k - 1; ++i) {
+          fl(a, b, buffer_[buffer_idx].kmer.get_v(i));
+          if (a >= b) {
+            break;
+          }
+        }
+        uint16_t pred_size = b - a;
+        if (pred_size > 0) {
+          uint64_t w_index = a;
           uint64_t a_w = w_index / 64;
           uint64_t a_b = ONE << (w_index % 64);
           uint16_t transition_char = buffer_[buffer_idx].kmer.get_v(k - 1);
