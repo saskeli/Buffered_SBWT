@@ -30,6 +30,7 @@ class Buffered_SBWT {
   typedef Kmer<k> Kmer_t;
 
   class Dummy_trie;
+  template <bool short_circuit>
   class Streaming_search;
 
   struct B_elem {
@@ -67,7 +68,7 @@ class Buffered_SBWT {
   std::array<sdsl::rank_support_v5<>, 4> rank_supports_;
   std::array<sdsl::bit_vector, 4> new_bits_;
   sdsl::bit_vector suffix_group_starts_;
-  std::array<uint64_t, 5> c_table_;
+  std::array<uint64_t, 4> c_table_;
   std::vector<std::pair<uint64_t, uint64_t>> kmer_prefix_precalc_;
   std::vector<B_elem> buffer_;
   uint64_t n_nodes_;
@@ -128,7 +129,7 @@ class Buffered_SBWT {
   }
 
   void add_string(const std::string& addable, std::vector<B_elem>& vec) {
-    Streaming_search ss(addable, *this);
+    Streaming_search<false> ss(addable, *this);
     Kmer_t kmer;
     uint64_t pred_idx;
     uint16_t pred_size;
@@ -550,7 +551,7 @@ class Buffered_SBWT {
       sdsl::util::init_support(rank_supports_[i], &(bits_[i]));
     }
 
-    for (uint16_t i = 1; i <= 4; ++i) {
+    for (uint16_t i = 1; i < 4; ++i) {
       c_table_[i] = rank_supports_[i - 1].rank(n_size);
       c_table_[i] += c_table_[i - 1];
     }
@@ -573,7 +574,7 @@ class Buffered_SBWT {
         rank_supports_(),
         new_bits_(),
         suffix_group_starts_(1),
-        c_table_({1, 1, 1, 1, 1}),
+        c_table_({1, 1, 1, 1}),
         kmer_prefix_precalc_(ONE << (2 * precalc_k), {1, 1}),
         n_nodes_(1),
         n_kmers_(0) {
@@ -645,11 +646,7 @@ class Buffered_SBWT {
         rank_supports_[i].serialize(out_stream.stream);
       }
       written += suffix_group_starts_.serialize(out_stream.stream);
-      std::vector<uint64_t> C;
-      for (uint16_t i = 0; i < 4; ++i) {
-        C.push_back(c_table_[i]);
-      }
-      written += serialize_std_vector(C, out_stream);
+      written += serialize_std_array(c_table_, out_stream);
       std::vector<std::pair<int64_t, int64_t>> old_precalc;
       for (auto P : kmer_prefix_precalc_) {
         std::pair<int64_t, int64_t> upd_P(P);
@@ -714,12 +711,7 @@ class Buffered_SBWT {
             rank_supports_[i].load(in_stream.stream, &(bits_[i]));
           }
           suffix_group_starts_.load(in_stream.stream);
-          std::array<uint64_t, 4> t_arr;
-          load_std_array(t_arr, in_stream);
-          for (uint16_t i = 0; i < 4; ++i) {
-            c_table_[i] = t_arr[i];
-          }
-          c_table_[4] = bits_[0].size();
+          load_std_array(c_table_, in_stream);
           load_std_vector(kmer_prefix_precalc_, in_stream);
           int64_t t_p_k;
           in_stream.read(reinterpret_cast<char*>(&t_p_k), sizeof(t_p_k));
@@ -827,13 +819,23 @@ class Buffered_SBWT {
     return I.first == I.second ? -1 : I.first;
   }
 
-  std::vector<int64_t> streaming_search(const std::string& input) const {
-    std::vector<int64_t> ret;
-    Streaming_search ss(input, *this);
+  void streaming_search(const std::string& input, uint64_t& count, uint64_t& matches) {
+    Streaming_search<true> ss(input, *this);
+    uint64_t i; 
+    bool found;
+    while (ss.next(i, found)) {
+      matches += found;
+      ++count;
+    }
+  }
+
+  std::vector<bool> streaming_search(const std::string& input) const {
+    std::vector<bool> ret;
+    Streaming_search<true> ss(input, *this);
     uint64_t i;
     bool found;
     while (ss.next(i, found)) {
-      ret.push_back(found ? i : -1);
+      ret.push_back(found);
     }
     return ret;
   }
@@ -844,7 +846,7 @@ class Buffered_SBWT {
 
   void print() {
     std::cout << "SBWT C-table, matrix, suffix group starts." << std::endl;
-    for (uint16_t i = 0; i <= 4; ++i) {
+    for (uint16_t i = 0; i < 4; ++i) {
       std::cout << c_table_[i] << " ";
     }
     std::cout << "<- C-table" << std::endl;
@@ -977,13 +979,14 @@ class Buffered_SBWT {
 };
 
 template <uint16_t k, uint16_t precalc_k>
+template <bool short_circuit>
 class Buffered_SBWT<k, precalc_k>::Streaming_search {
  private:
   const Buffered_SBWT& static_bsbwt_;
   const std::string& searchable_;
   Kmer<k> kmer_;
   uint64_t pred_;
-  uint64_t loc_;
+  uint64_t loc_ = 0;
   uint64_t index_ = k - 1;
   uint16_t p_size_ = 0;
   bool found_ = false;
@@ -1005,14 +1008,6 @@ class Buffered_SBWT<k, precalc_k>::Streaming_search {
         }
         --a;
       }
-      uint64_t steps = static_bsbwt_.suffix_group_starts_.size() - b;
-      steps = steps > 3 ? 3 : steps;
-      for (uint16_t i = 0; i < steps; ++i) {
-        if (static_bsbwt_.suffix_group_starts_[b]) {
-          break;
-        }
-        ++b;
-      }
       pred_ = a;
       p_size_ = b - a;
       static_bsbwt_.fl(a, b, kmer_.get_v(k - 1));
@@ -1025,6 +1020,17 @@ class Buffered_SBWT<k, precalc_k>::Streaming_search {
       uint64_t b = p.second;
       for (uint16_t i = precalc_k; i < k - 1; ++i) {
         static_bsbwt_.fl(a, b, kmer_.get_v(i));
+        if constexpr (short_circuit) {
+          if (a >= b) {
+            found_ = false;
+            found = false;
+            ++index_;
+            if (index_ < searchable_.size()) [[likely]] {
+              kmer_ = kmer_.next(searchable_[index_]);
+            }
+            return true;
+          }
+        }
       }
       pred_ = a;
       p_size_ = b - a;

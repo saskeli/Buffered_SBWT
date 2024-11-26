@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <omp.h>
 
 #include "Buffered_SBWT.hpp"
 #include "IO_helper.hpp"
@@ -14,18 +15,19 @@
 #endif
 
 void help(std::string bin_l) {
-  std::cout << R"(Do stuff with buffered sbwt structures.
+  std::cout << R"(Build buffered sbwt structures.
 
 Usage: )" << bin_l
             << R"( [OPTIONS] [sbwt1] [sbwt2] [file_list.txt]
 
-If two sbwt files are given without any .txt file, the two indexes are compared.
+The k-mers from the fastas referenced in the .txt file are added to the optional input sbwt index. 
+The created index is stored to the output sbwt index.
 
-If a .txt file and at least sbwt file are given, the fastas referenced in the list file are added to index.
+Input file list and output sbwt path are required arguments.
 
 Options:
-  sbwt1          input index 1 or output file if sbwt2 is not given.
-  sbwt2          output file, or index 2 for comparison.
+  -i in_sbwt     input index 1 or output file if sbwt2 is not given.
+  out_sbwt       output file, or index 2 for comparison.
   file_list.txt  file containing paths to input fasta files, 1 per line.
   -r             Also add reverse complement of input to index.
   -n             Do not filter out N characters from input. (use if you know there are none.)
@@ -33,28 +35,11 @@ Options:
             << omp_get_max_threads() << R"(
   -m X           Give a soft size limit (in giga bytes) for the buffer. Default X=0.5.
   --old_format   Output in sbwt v0.1 instead of the default v0.2.
-  -h             Print help usage and terminate.
+  -h             Print help and terminate. Overrides other parameters.
   )" << std::endl;
 }
 
 typedef sbwt::Buffered_SBWT<K, PRECALC_K> buf_t;
-
-void comp(std::string a, std::string b) {
-  buf_t bufa(a);
-  buf_t bufb(b);
-  if (not bufa.is_valid()) {
-    std::cerr << a << " validation failed" << std::endl;
-  }
-  if (not bufb.is_valid()) {
-    std::cerr << b << " validation failed" << std::endl;
-  }
-  if (bufa.compare(bufb)) {
-    std::cout << "All is fine?" << std::endl;
-  } else {
-    std::cout << "Is broken!" << std::endl;
-    exit(1);
-  }
-}
 
 void add_files(std::string input_path, std::string output_path,
                std::string sbwt_path, bool rev_comp, bool filter_n,
@@ -74,7 +59,7 @@ void add_files(std::string input_path, std::string output_path,
   std::cout << sbwt_path << " loaded in "
             << double(duration_cast<nanoseconds>(t2 - t1).count()) / 1000000
             << " ms\n";
-  std::cout << "    with " << o_size << " 31-mers" << std::endl;
+  std::cout << "    with " << o_size << " " << K << "-mers" << std::endl;
   /*if (not buf.is_valid()) {
       exit(1);
   }*/
@@ -127,6 +112,8 @@ int main(int argc, char const* argv[]) {
     }
     if (std::strstr(argv[i], "-r")) {
       rev_comp = true;
+    } else if (std::strstr(argv[i], "-i")) {
+      in_sbwt = argv[++i];
     } else if (std::strstr(argv[i], "--old_format")) {
       output_old_format = true;
     } else if (std::strstr(argv[i], "-n")) {
@@ -139,17 +126,15 @@ int main(int argc, char const* argv[]) {
       if (in_files.size() == 0) {
         in_files = argv[i];
       } else {
-        std::cerr << "At most one text file in the paramerters" << std::endl;
+        std::cerr << "At most one text file in the parameters" << std::endl;
         help(argv[0]);
         exit(1);
       }
     } else {
-      if (in_sbwt.size() == 0) {
-        in_sbwt = argv[i];
-      } else if (out_sbwt.size() == 0) {
+      if (out_sbwt.size() == 0) {
         out_sbwt = argv[i];
       } else {
-        std::cerr << "At most two index files in the parameters" << std::endl;
+        std::cerr << "Exactly one output index file is required" << std::endl;
         help(argv[0]);
         exit(1);
       }
@@ -158,8 +143,8 @@ int main(int argc, char const* argv[]) {
   if (num_threads != omp_get_max_threads()) {
     omp_set_num_threads(num_threads);
   }
-  std::cout << "sbwt 1: " << (in_sbwt.size() ? in_sbwt : "N/A") << "\n"
-            << "sbwt 2: " << (out_sbwt.size() ? out_sbwt : "N/A") << "\n"
+  std::cout << "in sbwt: " << (in_sbwt.size() ? in_sbwt : "N/A") << "\n"
+            << "out_sbwt: " << (out_sbwt.size() ? out_sbwt : "N/A") << "\n"
             << "text file: " << (in_files.size() ? in_files : "N/A") << "\n"
             << "extract reverse complements: " << rev_comp << "\n"
             << "filter N characters: " << filter_n << "\n"
@@ -168,23 +153,18 @@ int main(int argc, char const* argv[]) {
             << "output fomat: " << (output_old_format ? "v0.1\n" : "v0.2\n")
             << std::endl;
   if (in_files.size() > 0) {
-    if (in_sbwt.size() == 0) {
-      std::cerr << "At least an output sbwt file is required" << std::endl;
+    if (out_sbwt.size() == 0) {
+      std::cerr << "Output sbwt file is required" << std::endl;
       help(argv[0]);
       exit(1);
     }
-    if (out_sbwt.size() == 0) {
-      add_files(in_files, in_sbwt, "", rev_comp, filter_n, buffer_gigs,
-                output_old_format);
-    } else {
-      add_files(in_files, out_sbwt, in_sbwt, rev_comp, filter_n, buffer_gigs,
-                output_old_format);
-    }
+    add_files(in_files, out_sbwt, in_sbwt, rev_comp, filter_n, buffer_gigs,
+              output_old_format);
     exit(0);
-  } else if (in_sbwt.size() > 0 && out_sbwt.size() > 0) {
-    comp(in_sbwt, out_sbwt);
-    exit(0);
+  } else {
+    std::cerr << "Input text file is required" << std::endl;
+    help(argv[0]);
+    exit(1);
   }
-  help(argv[0]);
   return 0;
 }

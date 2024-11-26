@@ -34,6 +34,8 @@ build
 debug_build
 search
 debug_search
+compare
+debug_compare
 
 # vscode settings
 .vscode/

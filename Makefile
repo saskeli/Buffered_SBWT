@@ -24,19 +24,33 @@ HEADERS = include/Buffered_SBWT.hpp include/IO_helper.hpp include/kmer.hpp inclu
 
 SDSL_A = sdsl-lite/lib/libsdsl.a
 
-.PHONY: clean all
+.PHONY: clean all debug
 
 .DEFAULT: all
 
 %/%.hpp:
 
-all: build
+all: build compare search
+
+debug: debug_build debug_compare debug_search
 
 build: build.cpp $(HEADERS) $(SDSL_A)
 	g++ $(CFLAGS) $(PERF_FLAGS) $(INCLUDE) build.cpp -o build $(LIBS)
 
+compare: compare.cpp $(HEADERS) $(SDSL_A)
+	g++ $(CFLAGS) $(PERF_FLAGS) $(INCLUDE) compare.cpp -o compare $(LIBS)
+
+search: search.cpp $(HEADERS) $(SDSL_A)
+	g++ $(CFLAGS) $(PERF_FLAGS) $(INCLUDE) search.cpp -o search $(LIBS)
+
 debug_build: build.cpp $(HEADERS) $(SDSL_A)
 	g++ $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDE) build.cpp -o debug_build $(LIBS)
+
+debug_compare: compare.cpp $(HEADERS) $(SDSL_A)
+	g++ $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDE) compare.cpp -o debug_compare $(LIBS)
+
+debug_search: search.cpp $(HEADERS) $(SDSL_A)
+	g++ $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDE) search.cpp -o debug_search $(LIBS)
 
 $(SDSL_A):
 	$(cd sdsl-lite && cmake CMakelists.txt && make)
