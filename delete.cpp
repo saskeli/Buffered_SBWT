@@ -15,21 +15,23 @@
 #endif
 
 void help(std::string bin_l) {
-  std::cout << R"(Build buffered sbwt structures.
+  std::cout << R"(Remove elements from buffered sbwt structures.
 
 Usage: )" << bin_l
             << R"( [OPTIONS] [sbwt1] [sbwt2] [file_list.txt]
 
-The k-mers from the fastas referenced in the .txt file are added to the optional input sbwt index. 
+The k-mers from the fastas referenced in the .txt file are removed from the input sbwt index. 
 The created index is stored to the output sbwt index.
 
 Input file list and output sbwt path are required arguments.
+Input sbwt is not strictly required but this is a very complicated way to make an empty sbwt,
+starting from an empty index.
 
 Options:
   -i in_sbwt     Input index.
-  out_sbwt       Output file.
+  out_sbwt       output file.
   file_list.txt  file containing paths to input fasta files, 1 per line.
-  -r             Also add reverse complement of input to index.
+  -r             Also remove reverse complement of input from index.
   -n             Do not filter out N characters from input. (use if you know there are none.)
   -t n           How many threads to run. Default = )"
             << omp_get_max_threads() << R"(
@@ -41,7 +43,7 @@ Options:
 
 typedef sbwt::Buffered_SBWT<K, PRECALC_K> buf_t;
 
-void add_files(std::string input_path, std::string output_path,
+void remove_files(std::string input_path, std::string output_path,
                std::string sbwt_path, bool rev_comp, bool filter_n,
                double buffer_gigs, bool old_output_format) {
   using std::chrono::duration_cast;
@@ -68,18 +70,18 @@ void add_files(std::string input_path, std::string output_path,
 
   sbwt::io_container<K> reader(input_files, rev_comp, filter_n);
 
-  uint64_t offered_k_mers = buf.add_all(reader);
+  uint64_t offered_k_mers = buf.del_all(reader);
 
   t2 = high_resolution_clock::now();
-  double add_time = duration_cast<nanoseconds>(t2 - t1).count();
-  add_time /= 1000000;
+  double del_time = duration_cast<nanoseconds>(t2 - t1).count();
+  del_time /= 1000000;
   uint64_t n_size = buf.number_of_kmers();
   std::cout << "Saw " << offered_k_mers << " in total" << std::endl;
-  std::cout << "Added " << n_size - o_size << " k-mers in " << add_time << " ms"
+  std::cout << "Added " << o_size - n_size << " k-mers in " << del_time << " ms"
             << std::endl;
   ;
-  std::cout << add_time / (n_size - o_size) << "ms per added k-mer\n"
-            << add_time / (offered_k_mers) << "ms per offered k-mer"
+  std::cout << del_time / (o_size - n_size) << "ms per added k-mer\n"
+            << del_time / (offered_k_mers) << "ms per offered k-mer"
             << std::endl;
 
 #ifdef DEBUG
@@ -158,7 +160,7 @@ int main(int argc, char const* argv[]) {
       help(argv[0]);
       exit(1);
     }
-    add_files(in_files, out_sbwt, in_sbwt, rev_comp, filter_n, buffer_gigs,
+    remove_files(in_files, out_sbwt, in_sbwt, rev_comp, filter_n, buffer_gigs,
               output_old_format);
     exit(0);
   } else {

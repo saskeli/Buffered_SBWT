@@ -550,12 +550,18 @@ class Buffered_SBWT {
     std::cerr << "Delete at " << n_nodes_ << " with " << buffer_.size()
               << " removable k-mers" << std::endl;
 #endif
+#ifdef VERBOSE
+    print();
+#endif
     setup_buffer();
     compute_buffer_edges();
     Dummy_trie dummies(*this);
 #pragma omp parallel for
     for (uint64_t buffer_idx = 0; buffer_idx < buffer_.size(); ++buffer_idx) {
-      // Make sure no surviving child gets orphaned.
+// Make sure no surviving child gets orphaned.
+#ifdef VERBOSE
+      std::cerr << buffer_[buffer_idx].to_string() << std::endl;
+#endif
       if (buffer_[buffer_idx].group_head) {
         std::array<bool, 4> edges = {false, false, false, false};
         bool replace = false;
@@ -608,7 +614,8 @@ class Buffered_SBWT {
         // Replacement was a no go.
         // A new dummy is needed to replace a removed suffix group.
         if (replace) {
-          dummies.replace(buffer_[buffer_idx].kmer, edges);
+#pragma omp critical
+          { dummies.replace(buffer_[buffer_idx].kmer, edges, *this); }
         }
       }
 
@@ -626,7 +633,7 @@ class Buffered_SBWT {
               search_kmer<Kmer_t, k - 1, 0, false>(buffer_[buffer_idx].kmer);
           uint16_t v = buffer_[buffer_idx].kmer.get_v(k - 1);
           uint64_t w_i = P.first / 64;
-          uint64_t w_b = ~(ONE << (P.first % 64));
+          uint64_t w_b = ONE << (P.first % 64);
           uint64_t* d = new_bits_[v].data();
 #pragma omp atomic
           d[w_i] = d[w_i] & w_b;
@@ -650,10 +657,30 @@ class Buffered_SBWT {
     }
 #endif
 
+#ifdef VERBOSE
+    std::cout << "Xor table:\n";
+    for (uint64_t i = 0; i < n_nodes_; ++i) {
+      for (uint16_t ci = 0; ci < 4; ++ci) {
+        std::cout << " " << new_bits_[ci][i];
+      }
+      std::cout << std::endl;
+    }
+#endif
+
 #pragma omp parallel for
     for (uint16_t i = 0; i < 4; ++i) {
       new_bits_[i] ^= bits_[i];
     }
+
+#ifdef VERBOSE
+    std::cout << "Xorred:\n";
+    for (uint64_t i = 0; i < n_nodes_; ++i) {
+      for (uint16_t ci = 0; ci < 4; ++ci) {
+        std::cout << " " << new_bits_[ci][i];
+      }
+      std::cout << std::endl;
+    }
+#endif
 
     sdsl::bit_vector old_starts = suffix_group_starts_;
 
@@ -786,6 +813,10 @@ class Buffered_SBWT {
       c_table_[i] = rank_supports_[i - 1].rank(n_size);
       c_table_[i] += c_table_[i - 1];
     }
+
+#ifdef VERBOSE
+    print();
+#endif
 
     compute_k_mer_precalc();
     buffer_.clear();
@@ -976,9 +1007,9 @@ class Buffered_SBWT {
     commit();
   }
 
-  void del(const std::strign& removable) {
+  void del(const std::string& removable) {
     delete_string(removable, buffer_);
-    if (r_km.size() == 0) {
+    if (buffer_.size() == 0) {
       return;
     }
     r_commit();
@@ -1075,8 +1106,8 @@ class Buffered_SBWT {
             if (removable_k_mers.size() > 0) {
 #pragma omp critical
               {
-                r_km.insert(r_km.end(), removable_k_mers.begin(),
-                            removable_k_mers.end());
+                buffer_.insert(buffer_.end(), removable_k_mers.begin(),
+                               removable_k_mers.end());
               }
             }
             break;
@@ -1098,8 +1129,8 @@ class Buffered_SBWT {
               removable_k_mers.resize(trg);
 #pragma omp critical
               {
-                r_km.insert(buffer_.end(), removable_k_mers.begin(),
-                            removable_k_mers.end());
+                buffer_.insert(buffer_.end(), removable_k_mers.begin(),
+                               removable_k_mers.end());
               }
             }
             break;
@@ -1305,7 +1336,12 @@ class Buffered_SBWT<k, precalc_k>::Streaming_search {
     if (index_ >= searchable_.size()) {
       return false;
     }
-    if (found_) {
+    if (static_bsbwt_.n_nodes_ == 1) [[unlikely]] {
+      loc_ = 1;
+      found_ = false;
+      pred_ = 1;
+      p_size_ = 0;
+    } else if (found_) {
       uint64_t a = loc_;
       uint64_t b = a + 1;
       for (uint16_t i = 0; i < 4; ++i) {

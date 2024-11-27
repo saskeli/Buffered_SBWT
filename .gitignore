@@ -36,6 +36,8 @@ search
 debug_search
 compare
 debug_compare
+delete
+debug_delete
 
 # vscode settings
 .vscode/
