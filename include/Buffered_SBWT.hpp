@@ -562,7 +562,8 @@ class Buffered_SBWT {
 #ifdef VERBOSE
       std::cerr << buffer_[buffer_idx].to_string() << std::endl;
 #endif
-      if (buffer_[buffer_idx].group_head) {
+      if (buffer_[buffer_idx].group_head &&
+          suffix_group_starts_[buffer_[buffer_idx].source]) {
         std::array<bool, 4> edges = {false, false, false, false};
         bool replace = false;
         for (uint16_t i = 0; i < 4; ++i) {
@@ -589,6 +590,7 @@ class Buffered_SBWT {
             if (sib < buffer_.size() && buffer_[sib].source == trg) {
               // But it is the next element in the buffer.
               ++sib;
+              ++trg;
             } else {
               // And we can use it!
               replace = false;
@@ -607,8 +609,8 @@ class Buffered_SBWT {
               uint64_t* d = suffix_group_starts_.data();
 #pragma omp atomic
               d[w_i] = d[w_i] | w_b;
+              break;
             }
-            ++trg;
           }
         }
         // Replacement was a no go.
@@ -620,24 +622,19 @@ class Buffered_SBWT {
       }
 
       // Make sure no dangling edge gets left behind.
-      if (not buffer_[buffer_idx].b_pred) {
-        // The parent does not get removed so the edge needs to be deleted
-        // separately.
-        uint64_t d_id;
+      uint64_t d_id;
 #pragma omp critical
-        { d_id = dummies.remove_edge(buffer_[buffer_idx].kmer); }
-        // if d_id > 0, parent was a dummy and got removed.
-        if (d_id == 0) {
-          // Parent is not a dummy.
-          auto P =
-              search_kmer<Kmer_t, k - 1, 0, false>(buffer_[buffer_idx].kmer);
-          uint16_t v = buffer_[buffer_idx].kmer.get_v(k - 1);
-          uint64_t w_i = P.first / 64;
-          uint64_t w_b = ONE << (P.first % 64);
-          uint64_t* d = new_bits_[v].data();
+      { d_id = dummies.remove_edge(buffer_[buffer_idx].kmer, *this); }
+      // if d_id > 0, parent is a dummy and edge got removed.
+      if (d_id == 0) {
+        // Parent is not a dummy.
+        auto P = search_kmer<Kmer_t, k - 1, 0, false>(buffer_[buffer_idx].kmer);
+        uint16_t v = buffer_[buffer_idx].kmer.get_v(k - 1);
+        uint64_t w_i = P.first / 64;
+        uint64_t w_b = ONE << (P.first % 64);
+        uint64_t* d = new_bits_[v].data();
 #pragma omp atomic
-          d[w_i] = d[w_i] & w_b;
-        }
+        d[w_i] = d[w_i] | w_b;
       }
     }
 
@@ -658,13 +655,15 @@ class Buffered_SBWT {
 #endif
 
 #ifdef VERBOSE
-    std::cout << "Xor table:\n";
+    uint64_t xor_count = 0;
     for (uint64_t i = 0; i < n_nodes_; ++i) {
       for (uint16_t ci = 0; ci < 4; ++ci) {
+        xor_count += new_bits_[ci][i];
         std::cout << " " << new_bits_[ci][i];
       }
       std::cout << std::endl;
     }
+    std::cout << "Total " << xor_count << " xorrable bits" << std::endl;
 #endif
 
 #pragma omp parallel for
@@ -679,7 +678,7 @@ class Buffered_SBWT {
         std::cout << " " << new_bits_[ci][i];
       }
       std::cout << std::endl;
-    }
+    }  //*/
 #endif
 
     sdsl::bit_vector old_starts = suffix_group_starts_;
@@ -699,7 +698,7 @@ class Buffered_SBWT {
         total_compute += new_bits_[ci][i];
       }
       for (auto be : buffer_) {
-        total_compute -= be.edge[ci] > 0;
+        total_compute -= new_bits_[ci][be.source];
       }
       for (auto de : addables) {
         total_compute += de.out[ci] > 0;
@@ -1481,7 +1480,7 @@ class Buffered_SBWT<k, precalc_k>::Dummy_trie {
   }
 
   template <class Kmer_t>
-  uint64_t remove_edge(const Kmer_t& kmer) {
+  uint64_t remove_edge(const Kmer_t& kmer, Buffered_SBWT& sbwt) {
     uint64_t dummy_id = 0;
     for (uint16_t i = 0; i < k - 1; ++i) {
       uint16_t v = kmer.get_v(i);
@@ -1492,9 +1491,12 @@ class Buffered_SBWT<k, precalc_k>::Dummy_trie {
     }
     uint16_t v = kmer.get_v(k - 1);
     nodes[dummy_id].out[v] = 0;
-    nodes[dummy_id].keep = false;
-    for (uint16_t i = 0; i < 4; ++i) {
-      nodes[dummy_id].keep |= nodes[dummy_id].out[v] > 0;
+    if (nodes[dummy_id].sbwt_index > 0) {
+      sbwt.new_bits_[v][nodes[dummy_id].sbwt_index] = true;
+    }
+    nodes[dummy_id].keep = nodes[dummy_id].out[0] > 0;
+    for (uint16_t i = 1; i < 4; ++i) {
+      nodes[dummy_id].keep |= nodes[dummy_id].out[i] > 0;
     }
     return dummy_id;
   }
@@ -1519,7 +1521,7 @@ class Buffered_SBWT<k, precalc_k>::Dummy_trie {
       uint64_t idx = nodes.size();
       uint16_t v = kmer.get_v(depth);
       Dummy_trie_node nd = {
-          nodes[id].kmer.next_v(v), {0, 0, 0, 0}, 0, uint16_t(depth + 1), true};
+          nodes[id].kmer.next_v(v), {0, 0, 0, 0}, 0, uint16_t(depth), true};
       if (depth == k - 1) {
         for (uint16_t i = 0; i < 4; ++i) {
           nd.out[i] = edges[i];

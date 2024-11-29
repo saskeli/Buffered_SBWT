@@ -24,13 +24,15 @@ HEADERS = include/Buffered_SBWT.hpp include/IO_helper.hpp include/kmer.hpp inclu
 
 SDSL_A = sdsl-lite/lib/libsdsl.a
 
-.PHONY: clean
+.PHONY: clean all fast debug
 
 .DEFAULT: all
 
 %/%.hpp:
 
-all: build compare search delete
+all: fast debug
+
+fast: build compare search delete
 
 debug: debug_build debug_compare debug_search debug_delete
 

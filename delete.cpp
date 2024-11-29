@@ -29,8 +29,9 @@ starting from an empty index.
 
 Options:
   -i in_sbwt     Input index.
-  out_sbwt       output file.
-  file_list.txt  file containing paths to input fasta files, 1 per line.
+  out_sbwt       Output file.
+  -f input_file  Fasta file with removable k-mers or file containing paths to input fasta files, 1 per line.
+                 Fasta can be gzipped or not. If file type is txt, read as list.
   -r             Also remove reverse complement of input from index.
   -n             Do not filter out N characters from input. (use if you know there are none.)
   -t n           How many threads to run. Default = )"
@@ -65,8 +66,12 @@ void remove_files(std::string input_path, std::string output_path,
   /*if (not buf.is_valid()) {
       exit(1);
   }*/
-
-  std::vector<std::string> input_files = sbwt::readlines(input_path);
+  std::vector<std::string> input_files;
+  if (input_path.ends_with(".txt")) {
+    input_files = sbwt::readlines(input_path);
+  } else {
+    input_files.push_back(input_path);
+  }
 
   sbwt::io_container<K> reader(input_files, rev_comp, filter_n);
 
@@ -77,10 +82,10 @@ void remove_files(std::string input_path, std::string output_path,
   del_time /= 1000000;
   uint64_t n_size = buf.number_of_kmers();
   std::cout << "Saw " << offered_k_mers << " in total" << std::endl;
-  std::cout << "Added " << o_size - n_size << " k-mers in " << del_time << " ms"
+  std::cout << "Deleted " << o_size - n_size << " k-mers in " << del_time << " ms"
             << std::endl;
   ;
-  std::cout << del_time / (o_size - n_size) << "ms per added k-mer\n"
+  std::cout << del_time / (o_size - n_size) << "ms per deleted k-mer\n"
             << del_time / (offered_k_mers) << "ms per offered k-mer"
             << std::endl;
 
@@ -108,30 +113,25 @@ int main(int argc, char const* argv[]) {
   std::string out_sbwt = "";
 
   for (size_t i = 1; i < size_t(argc); ++i) {
-    if (std::strstr(argv[i], "-h")) {
+    std::string arg(argv[i]);
+    if (arg == "-h") {
       help(argv[0]);
       exit(0);
     }
-    if (std::strstr(argv[i], "-r")) {
+    if (arg == "-r") {
       rev_comp = true;
-    } else if (std::strstr(argv[i], "-i")) {
+    } else if (arg == "-i") {
       in_sbwt = argv[++i];
-    } else if (std::strstr(argv[i], "--old_format")) {
+    } else if (arg == "--old_format") {
       output_old_format = true;
-    } else if (std::strstr(argv[i], "-n")) {
+    } else if (arg == "-n") {
       filter_n = false;
-    } else if (std::strstr(argv[i], "-m")) {
+    } else if (arg == "-m") {
       buffer_gigs = std::stod(argv[++i]);
-    } else if (std::strstr(argv[i], "-t")) {
+    } else if (arg == "-t") {
       num_threads = std::stoi(argv[++i]);
-    } else if (std::strstr(argv[i], ".txt")) {
-      if (in_files.size() == 0) {
-        in_files = argv[i];
-      } else {
-        std::cerr << "At most one text file in the parameters" << std::endl;
-        help(argv[0]);
-        exit(1);
-      }
+    } else if (arg == "-f") {
+      in_files = argv[++i];
     } else {
       if (out_sbwt.size() == 0) {
         out_sbwt = argv[i];

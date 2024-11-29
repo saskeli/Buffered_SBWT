@@ -28,7 +28,8 @@ Input file list and output sbwt path are required arguments.
 Options:
   -i in_sbwt     Input index.
   out_sbwt       Output file.
-  file_list.txt  file containing paths to input fasta files, 1 per line.
+  -f input_fasta Input fasta file or file containing paths to input fasta files, 1 per line.
+                 Fasta can be gzipped or not. If file type is txt, read as list.
   -r             Also add reverse complement of input to index.
   -n             Do not filter out N characters from input. (use if you know there are none.)
   -t n           How many threads to run. Default = )"
@@ -63,8 +64,12 @@ void add_files(std::string input_path, std::string output_path,
   /*if (not buf.is_valid()) {
       exit(1);
   }*/
-
-  std::vector<std::string> input_files = sbwt::readlines(input_path);
+  std::vector<std::string> input_files;
+  if (input_path.ends_with(".txt")) {
+    input_files = sbwt::readlines(input_path);
+  } else {
+    input_files.push_back(input_path);
+  }
 
   sbwt::io_container<K> reader(input_files, rev_comp, filter_n);
 
@@ -106,30 +111,25 @@ int main(int argc, char const* argv[]) {
   std::string out_sbwt = "";
 
   for (size_t i = 1; i < size_t(argc); ++i) {
-    if (std::strstr(argv[i], "-h")) {
+    std::string arg(argv[i]);
+    if (arg == "-h") {
       help(argv[0]);
       exit(0);
     }
-    if (std::strstr(argv[i], "-r")) {
+    if (arg == "-r") {
       rev_comp = true;
-    } else if (std::strstr(argv[i], "-i")) {
+    } else if (arg == "-i") {
       in_sbwt = argv[++i];
-    } else if (std::strstr(argv[i], "--old_format")) {
+    } else if (arg == "--old_format") {
       output_old_format = true;
-    } else if (std::strstr(argv[i], "-n")) {
+    } else if (arg == "-n") {
       filter_n = false;
-    } else if (std::strstr(argv[i], "-m")) {
+    } else if (arg == "-m") {
       buffer_gigs = std::stod(argv[++i]);
-    } else if (std::strstr(argv[i], "-t")) {
+    } else if (arg == "-t") {
       num_threads = std::stoi(argv[++i]);
-    } else if (std::strstr(argv[i], ".txt")) {
-      if (in_files.size() == 0) {
-        in_files = argv[i];
-      } else {
-        std::cerr << "At most one text file in the parameters" << std::endl;
-        help(argv[0]);
-        exit(1);
-      }
+    } else if (arg == "-f") {
+      in_files = argv[++i];
     } else {
       if (out_sbwt.size() == 0) {
         out_sbwt = argv[i];
