@@ -61,7 +61,7 @@ debug_delete: delete.cpp $(HEADERS) $(SDSL_A)
 	g++ $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDE) delete.cpp -o debug_delete $(LIBS)
 
 $(SDSL_A):
-	$(cd sdsl-lite && cmake CMakelists.txt && make)
+	(cd sdsl-lite && cmake CMakelists.txt && make)
 
 clean:
 	rm -f build compare search delete debug_build debug_compare debug_search debug_delete
