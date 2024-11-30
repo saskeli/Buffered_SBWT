@@ -21,11 +21,12 @@ void help(std::string bin_l) {
 Usage: )" << bin_l
             << R"( [OPTIONS] [sbwt] [file_list.txt]
   
-Search sbwt for k-mers from fasta files referenced in file_list.txt.
+Search sbwt for k-mers from fasta files.
   
 Options:
-  sbwt           index to search.
-  file_list.txt  file containing paths to input fasta files, 1 per line.
+  -i sbwt        Index to search.
+  files          Fasta file or file containing paths to input fasta files, 1 per line.
+                 Fasta can be gzipped or not. If file type is txt, read as list.
   -n             Do not filter out N characters from input. 
                  (use if you know there are none.)
   -h             Print help and terminate.)"
@@ -38,7 +39,10 @@ void search(std::string input_path, std::string sbwt_path, bool filter_n) {
   using std::chrono::nanoseconds;
 
   auto t1 = high_resolution_clock::now();
-  buf_t buf(sbwt_path, 1);
+  buf_t buf;
+  if (sbwt_path.size() > 0) {
+    buf.load(sbwt_path);  
+  }
 
   auto t2 = high_resolution_clock::now();
   uint64_t o_size = buf.number_of_kmers();
@@ -47,7 +51,12 @@ void search(std::string input_path, std::string sbwt_path, bool filter_n) {
             << " ms\n";
   std::cout << "    with " << o_size << " " << K << "-mers" << std::endl;
 
-  std::vector<std::string> input_files = sbwt::readlines(input_path);
+  std::vector<std::string> input_files;
+  if (input_path.ends_with(".txt")) {
+    input_files = sbwt::readlines(input_path);
+  } else {
+    input_files.push_back(input_path);
+  }
 
   sbwt::io_container<K> reader(input_files, false, filter_n);
 
@@ -73,43 +82,35 @@ int main(int argc, char const* argv[]) {
   std::string in_files = "";
 
   for (size_t i = 1; i < size_t(argc); ++i) {
-    if (std::strstr(argv[i], "-h")) {
+    std::string arg(argv[i]);
+    if (arg == "-h") {
       help(argv[0]);
       exit(0);
     }
-    if (std::strstr(argv[i], "-n")) {
+    if (arg == "-n") {
       filter_n = false;
-    } else if (std::strstr(argv[i], ".txt")) {
+    } if (arg == "-i") { 
+      in_sbwt = argv[++i];
+    } else {
       if (in_files.size() == 0) {
         in_files = argv[i];
       } else {
-        std::cerr << "At most one text file in the paramerters" << std::endl;
-        help(argv[0]);
-        exit(1);
-      }
-    } else {
-      if (in_sbwt.size() == 0) {
-        in_sbwt = argv[i];
-      } else {
-        std::cerr << "At most one index file in the parameters" << std::endl;
+        std::cerr << "At most one text file in the paramerters\n" 
+                  << "current: " << in_files << "\n"
+                  << "new: " << argv[i] << std::endl;
         help(argv[0]);
         exit(1);
       }
     }
   }
-  std::cout << "sbwt: " << in_sbwt << "\n"
+  std::cout << "sbwt: " << (in_sbwt.size() > 0 ? in_sbwt : "N/A") << "\n"
             << "text file: " << in_files << "\n"
             << "filter N characters: " << filter_n << std::endl;
   if (in_files.size() > 0) {
-    if (in_sbwt.size() == 0) {
-      std::cerr << "sbwt file is required" << std::endl;
-      help(argv[0]);
-      exit(1);
-    }
     search(in_files, in_sbwt, filter_n);
     exit(0);
   } else {
-    std::cerr << "txt file is required" << std::endl;
+    std::cerr << "File(s) to search is required" << std::endl;
   }
   help(argv[0]);
   return 0;
