@@ -612,6 +612,34 @@ class Buffered_SBWT {
               break;
             }
           }
+        } else {
+          // We still need ot update the suffix group leader unless this group
+          // becomes empty.
+          uint64_t sib = buffer_idx + 1;
+          for (uint64_t i = 1; i < 4; ++i) {
+            uint64_t trg = buffer_[buffer_idx].source + i;
+            if (trg >= n_nodes_) {
+              // Out of sbwt.
+              break;
+            }
+            if (not suffix_group_starts_[trg]) {
+              // Next element in sbwt is in same suffix group.
+              if (buffer_.size() <= sib || buffer_[sib].source != trg) {
+                // And will not be reomved. So can become new group leader.
+                uint64_t* d = suffix_group_starts_.data();
+                uint64_t w_i = trg / 64;
+                uint64_t w_b = ONE << (trg % 64);
+#pragma omp atomic
+                d[w_i] = d[w_i] | w_b;
+              } else {
+                // But next element gets removed also.
+                ++sib;
+              }
+            } else {
+              // Next element is in different suffix group.
+              break;
+            }
+          }
         }
         // Replacement was a no go.
         // A new dummy is needed to replace a removed suffix group.
@@ -686,6 +714,17 @@ class Buffered_SBWT {
     uint64_t o_size = n_nodes_;
     uint64_t n_size =
         o_size - buffer_.size() + addables.size() - removables.size();
+#ifdef DEBUG
+    if (n_size > o_size + addables.size() || n_size < 1) {
+      std::cerr << "Dummy trie size: " << dummies.nodes.size() << std::endl;
+      std::cerr << "Invalid new size\n"
+                << "old_size - buffer_size + addable_dummies - "
+                << "removabele_dummies = \n"
+                << o_size << " - " << buffer_.size() << " + " << addables.size()
+                << " - " << removables.size() << " = " << n_size << std::endl;
+      exit(1);
+    }
+#endif
     for (uint16_t i = 0; i < 4; ++i) {
       bits_[i].bit_resize(n_size);
     }
@@ -1180,17 +1219,79 @@ class Buffered_SBWT {
 
   uint16_t get_k() const { return k; }
 
+  std::vector<std::string> reconstruct_all_kmers() const {
+    uint64_t n_nodes = n_nodes_;
+    std::vector<uint64_t> C_array(4);
+
+    std::vector<char> last;  // last[i] = incoming character to node i
+    last.push_back('$');
+
+    C_array[0] = last.size();
+    for (uint64_t i = 0; i < n_nodes; i++)
+      if (bits_[0][i]) last.push_back('A');
+
+    C_array[1] = last.size();
+    for (uint64_t i = 0; i < n_nodes; i++)
+      if (bits_[1][i]) last.push_back('C');
+
+    C_array[2] = last.size();
+    for (uint64_t i = 0; i < n_nodes; i++)
+      if (bits_[2][i]) last.push_back('G');
+
+    C_array[3] = last.size();
+    for (uint64_t i = 0; i < n_nodes; i++)
+      if (bits_[3][i]) last.push_back('T');
+
+    if (last.size() != n_nodes) {
+      cerr << "BUG " << last.size() << " " << n_nodes << endl;
+      exit(1);
+    }
+
+    std::string kmers_concat(n_nodes * k, '\0');
+
+    for (uint64_t round = 0; round < k; round++) {
+      // cerr << "round " << round << "/" << k-1 << endl;
+      for (uint64_t i = 0; i < n_nodes; i++) {
+        uint64_t pos = k - 1 - round;
+        kmers_concat[i * k + pos] = last[i];
+      }
+
+      // Propagate the labels one step forward in the graph
+      std::vector<char> propagated(n_nodes, '$');
+      uint64_t A_ptr = C_array[0];
+      uint64_t C_ptr = C_array[1];
+      uint64_t G_ptr = C_array[2];
+      uint64_t T_ptr = C_array[3];
+      for (uint64_t i = 0; i < n_nodes; i++) {
+        if (bits_[0][i]) propagated[A_ptr++] = last[i];
+        if (bits_[1][i]) propagated[C_ptr++] = last[i];
+        if (bits_[2][i]) propagated[G_ptr++] = last[i];
+        if (bits_[3][i]) propagated[T_ptr++] = last[i];
+      }
+      last = propagated;
+    }
+    std::vector<std::string> ret;
+    for (uint64_t i = 0; i < kmers_concat.size() - k + 1; i += k) {
+      ret.push_back(kmers_concat.substr(i, k));
+    }
+    return ret;
+  }
+
   void print() {
     std::cout << "SBWT C-table, matrix, suffix group starts." << std::endl;
     for (uint16_t i = 0; i < 4; ++i) {
       std::cout << c_table_[i] << " ";
     }
     std::cout << "<- C-table" << std::endl;
+    for (uint16_t i = 0; i <= k; ++i) {
+      std::cout << " ";
+    }
     std::cout << "a c g t    sgs" << std::endl;
+    auto r = reconstruct_all_kmers();
     for (uint64_t i = 0; i < n_nodes_; ++i) {
-      std::cout << bits_[0][i] << " " << bits_[1][i] << " " << bits_[2][i]
-                << " " << bits_[3][i] << "    " << suffix_group_starts_[i]
-                << std::endl;
+      std::cout << r[i] << " " << bits_[0][i] << " " << bits_[1][i] << " "
+                << bits_[2][i] << " " << bits_[3][i] << "    "
+                << suffix_group_starts_[i] << std::endl;
     }
     /*std::cout << "Prefix precald:\n";
     for (auto p : static_sbwt.kmer_prefix_precalc) {

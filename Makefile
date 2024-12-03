@@ -6,7 +6,7 @@ ifndef PRECALC_K
 PRECALC_K = 8
 endif
 
-CFLAGS = -std=c++2b -Wall -Wextra -Wshadow -pedantic -march=native -DK=$(K) -DPRECALC_K=$(PRECALC_K)  -fopenmp
+CFLAGS = -std=c++2a -Wall -Wextra -Wshadow -pedantic -march=native -DK=$(K) -DPRECALC_K=$(PRECALC_K)  -fopenmp
 
 PERF_FLAGS = -Ofast -DNDEBUG
 
