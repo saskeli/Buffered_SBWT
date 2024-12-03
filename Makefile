@@ -6,7 +6,7 @@ ifndef PRECALC_K
 PRECALC_K = 8
 endif
 
-CFLAGS = -std=c++2a -Wall -Wextra -Wshadow -pedantic -march=native -DK=$(K) -DPRECALC_K=$(PRECALC_K)  -fopenmp
+CFLAGS = -std=c++2a -Wall -Wextra -Wshadow -pedantic -march=native -DK=$(K) -DPRECALC_K=$(PRECALC_K) -fopenmp
 
 PERF_FLAGS = -Ofast -DNDEBUG
 
@@ -59,6 +59,12 @@ debug_search: search.cpp $(HEADERS) $(SDSL_A)
 
 debug_delete: delete.cpp $(HEADERS) $(SDSL_A)
 	g++ $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDE) delete.cpp -o debug_delete $(LIBS)
+
+tester: tester.cpp $(HEADERS) $(SDSL_A)
+	g++ -std=c++2a -Wall -Wextra -Wshadow -pedantic -march=native -fopenmp $(PERF_FLAGS) $(INCLUDE) tester.cpp -o tester $(LIBS)
+
+tester_deb: tester.cpp $(HEADERS) $(SDSL_A)
+	g++ -std=c++2a -Wall -Wextra -Wshadow -pedantic -march=native -fopenmp $(DEBUG_FLAGS) $(INCLUDE) tester.cpp -o tester_deb $(LIBS)
 
 $(SDSL_A):
 	(cd sdsl-lite && cmake CMakelists.txt && make)

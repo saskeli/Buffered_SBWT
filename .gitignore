@@ -38,6 +38,8 @@ compare
 debug_compare
 delete
 debug_delete
+tester
+tester_deb
 
 # vscode settings
 .vscode/
