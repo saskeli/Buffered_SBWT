@@ -811,21 +811,34 @@ class Buffered_SBWT {
                                                : s_lim});
         continue;
       }
-      uint64_t copy_count = next_i - sbwt_index;
-      uint64_t w = write_index / 64;
+      uint64_t copy_count = std::min(next_i, o_size) - sbwt_index;
+      copy_count = std::min(n_size - write_index, copy_count);
+      #ifdef DEBUG
+      if (sbwt_index + copy_count > o_size) {
+        std::cerr << "Can't copy " << copy_count << " elements from " << sbwt_index
+                  << "\nGoes " << sbwt_index + copy_count - o_size << std::endl;
+        exit(1);
+      }
+      if (write_index + copy_count > n_size) {
+        std::cerr << "Can't copy " << copy_count << " elements to " << write_index
+                  << "\nGoes " << write_index + copy_count - n_size << std::endl;
+        exit(1);
+      }
+      #endif
+      uint64_t w;
+      uint64_t w_i = write_index / 64;
       uint8_t w_o = write_index % 64;
       write_index += copy_count;
-      uint64_t r = sbwt_index / 64;
+      uint64_t r_i = sbwt_index / 64;
       uint8_t r_o = sbwt_index % 64;
-      sbwt_index = next_i;
       std::array<uint64_t*, 4> w_ptr = {
-          bits_[0].data() + w, bits_[1].data() + w, bits_[2].data() + w,
-          bits_[3].data() + w};
-      uint64_t* s_w_ptr = suffix_group_starts_.data() + w;
+          bits_[0].data() + w_i, bits_[1].data() + w_i, bits_[2].data() + w_i,
+          bits_[3].data() + w_i};
+      uint64_t* s_w_ptr = suffix_group_starts_.data() + w_i;
       std::array<uint64_t*, 4> r_ptr = {
-          new_bits_[0].data() + r, new_bits_[1].data() + r,
-          new_bits_[2].data() + r, new_bits_[3].data() + r};
-      uint64_t* s_r_ptr = old_starts.data() + r;
+          new_bits_[0].data() + r_i, new_bits_[1].data() + r_i,
+          new_bits_[2].data() + r_i, new_bits_[3].data() + r_i};
+      uint64_t* s_r_ptr = old_starts.data() + r_i;
       while (copy_count > 64) {
         for (uint16_t i = 0; i < 4; ++i) {
           w = sdsl::bits::read_int(r_ptr[i]++, r_o);
@@ -841,6 +854,7 @@ class Buffered_SBWT {
       }
       w = sdsl::bits::read_int(s_r_ptr, r_o, copy_count);
       sdsl::bits::write_int(s_w_ptr, w, w_o, copy_count);
+      sbwt_index = next_i;
     }
 
     for (uint16_t i = 0; i < 4; ++i) {
