@@ -18,7 +18,7 @@ endif
 
 INCLUDE = -I include -isystem sdsl-lite/include -isystem SeqIO/include
 
-LIBS = -L sdsl-lite/lib -lsdsl
+LIBS = -L sdsl-lite/lib -lsdsl -lz
 
 HEADERS = include/Buffered_SBWT.hpp include/IO_helper.hpp include/kmer.hpp include/throwing_streams.hpp include/utils.hpp
 

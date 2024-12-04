@@ -1,7 +1,8 @@
+#include <omp.h>
+
 #include <cstdint>
 #include <iostream>
 #include <string>
-#include <omp.h>
 
 #include "Buffered_SBWT.hpp"
 #include "IO_helper.hpp"
@@ -70,10 +71,16 @@ void add_files(std::string input_path, std::string output_path,
   } else {
     input_files.push_back(input_path);
   }
+  uint64_t offered_k_mers;
+  if (input_files[0].ends_with(".gz")) {
+    sbwt::io_container<K, true> reader(input_files, rev_comp, filter_n);
 
-  sbwt::io_container<K> reader(input_files, rev_comp, filter_n);
+    offered_k_mers = buf.add_all(reader);
+  } else {
+    sbwt::io_container<K> reader(input_files, rev_comp, filter_n);
 
-  uint64_t offered_k_mers = buf.add_all(reader);
+    offered_k_mers = buf.add_all(reader);
+  }
 
   t2 = high_resolution_clock::now();
   double add_time = duration_cast<nanoseconds>(t2 - t1).count();

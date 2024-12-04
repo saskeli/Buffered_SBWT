@@ -2,15 +2,21 @@
 
 #include <cstdint>
 #include <string>
+#include <type_traits>
 
 #include "SeqIO/SeqIO.hh"
 
 namespace sbwt {
 
-template <uint16_t k>
+template <uint16_t k, bool gzipped = false>
 class io_container {
  private:
-  seq_io::Multi_File_Reader<> reader;
+  typedef std::conditional<
+      gzipped,
+      seq_io::Multi_File_Reader<seq_io::Reader<seq_io::Buffered_ifstream<seq_io::zstr::ifstream>>>,
+      seq_io::Multi_File_Reader<>>::type reader_t;
+
+  reader_t reader;
   bool filter_n_;
   uint64_t s_len;
   uint64_t s_loc;
