@@ -37,15 +37,19 @@ Options:
             << omp_get_max_threads() << R"(
   -m X           Give a soft size limit (in giga bytes) for the buffer. Default X=0.5.
   --old_format   Output in sbwt v0.1 instead of the default v0.2.
+  -d             Directory containing input files. The given path will be prepended to the
+                 input fasta files. Use in case the input list contains only file names.
   -h             Print help and terminate. Overrides other parameters.
-  )" << std::endl;
+
+Example: )" << bin_l << R"( -r -m 8 -d data/ -f fof.txt out/fof.sbwt
+)" << std::endl;
 }
 
 typedef sbwt::Buffered_SBWT<K, PRECALC_K> buf_t;
 
 void add_files(std::string input_path, std::string output_path,
                std::string sbwt_path, bool rev_comp, bool filter_n,
-               double buffer_gigs, bool old_output_format) {
+               double buffer_gigs, bool old_output_format, std::string data_folder) {
   using std::chrono::duration_cast;
   using std::chrono::high_resolution_clock;
   using std::chrono::nanoseconds;
@@ -67,10 +71,11 @@ void add_files(std::string input_path, std::string output_path,
   }*/
   std::vector<std::string> input_files;
   if (input_path.ends_with(".txt")) {
-    input_files = sbwt::readlines(input_path);
+    input_files = sbwt::readlines(input_path, data_folder);
   } else {
-    input_files.push_back(input_path);
+    input_files.push_back(data_folder + input_path);
   }
+  sbwt::ensure_exists(input_files);
   uint64_t offered_k_mers;
   if (input_files[0].ends_with(".gz")) {
     sbwt::io_container<K, true> reader(input_files, rev_comp, filter_n);
@@ -116,6 +121,7 @@ int main(int argc, char const* argv[]) {
   std::string in_sbwt = "";
   std::string in_files = "";
   std::string out_sbwt = "";
+  std::string data_folder = "";
 
   for (size_t i = 1; i < size_t(argc); ++i) {
     std::string arg(argv[i]);
@@ -137,6 +143,8 @@ int main(int argc, char const* argv[]) {
       num_threads = std::stoi(argv[++i]);
     } else if (arg == "-f") {
       in_files = argv[++i];
+    } else if (arg == "-d") {
+      data_folder = argv[++i];
     } else {
       if (out_sbwt.size() == 0) {
         out_sbwt = argv[i];
@@ -153,6 +161,7 @@ int main(int argc, char const* argv[]) {
   std::cout << "in sbwt: " << (in_sbwt.size() ? in_sbwt : "N/A") << "\n"
             << "out_sbwt: " << (out_sbwt.size() ? out_sbwt : "N/A") << "\n"
             << "text file: " << (in_files.size() ? in_files : "N/A") << "\n"
+            << "fasta dir: " << (data_folder.size() ? data_folder : "N/A") << "\n"
             << "extract reverse complements: " << rev_comp << "\n"
             << "filter N characters: " << filter_n << "\n"
             << "max buffer size (ish): " << buffer_gigs << " gigs\n"
@@ -166,7 +175,7 @@ int main(int argc, char const* argv[]) {
       exit(1);
     }
     add_files(in_files, out_sbwt, in_sbwt, rev_comp, filter_n, buffer_gigs,
-              output_old_format);
+              output_old_format, data_folder);
     exit(0);
   } else {
     std::cerr << "Input text file is required" << std::endl;

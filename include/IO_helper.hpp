@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 
@@ -8,12 +10,23 @@
 
 namespace sbwt {
 
+void ensure_exists(const std::vector<std::string>& filelist) {
+  for (auto p : filelist) {
+    if (not std::filesystem::exists(p)) {
+      std::string err = "Could not open ";
+      err.append(p);
+      throw std::runtime_error(err);
+    }
+  }
+}
+
 template <uint16_t k, bool gzipped = false>
 class io_container {
  private:
   typedef std::conditional<
       gzipped,
-      seq_io::Multi_File_Reader<seq_io::Reader<seq_io::Buffered_ifstream<seq_io::zstr::ifstream>>>,
+      seq_io::Multi_File_Reader<
+          seq_io::Reader<seq_io::Buffered_ifstream<seq_io::zstr::ifstream>>>,
       seq_io::Multi_File_Reader<>>::type reader_t;
 
   reader_t reader;
@@ -22,9 +35,11 @@ class io_container {
   uint64_t s_loc;
 
  public:
-  io_container(std::vector<std::string>& filelist, bool rev_comp, bool filter_n)
+  io_container(const std::vector<std::string>& filelist, bool rev_comp, bool filter_n)
       : reader(filelist), filter_n_(filter_n) {
-    if (rev_comp) reader.enable_reverse_complements();
+    if (rev_comp) {
+      reader.enable_reverse_complements();
+    }
     s_len = reader.get_next_read_to_buffer();
     s_loc = 0;
   }

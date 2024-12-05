@@ -76,12 +76,12 @@ inline void load_std_array(AT& a, in_t& is) {
   is.read(reinterpret_cast<char*>(a.data()), sizeof(AT));
 }
 
-inline std::vector<std::string> readlines(const std::string& filename) {
+inline std::vector<std::string> readlines(const std::string& filename, const std::string& prefix = "") {
     std::vector<std::string> lines;
     std::string line;
     throwing_ifstream in(filename);
     while(getline(in.stream,line)){
-        lines.push_back(line);
+        lines.push_back(prefix + line);
     }
     return lines;
 }

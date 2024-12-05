@@ -29,11 +29,16 @@ Options:
                  Fasta can be gzipped or not. If file type is txt, read as list.
   -n             Do not filter out N characters from input. 
                  (use if you know there are none.)
-  -h             Print help and terminate.)"
-            << std::endl;
+  -d             Directory containing input files. The given path will be prepended to the
+                 input fasta files. Use in case the input list contains only file names.
+  -h             Print help and terminate.
+
+Example: )" << bin_l
+            << R"( -d data/ fof.txt -i out/fof.sbwt
+)" << std::endl;
 }
 
-void search(std::string input_path, std::string sbwt_path, bool filter_n) {
+void search(std::string input_path, std::string sbwt_path, bool filter_n, std::string data_dir) {
   using std::chrono::duration_cast;
   using std::chrono::high_resolution_clock;
   using std::chrono::nanoseconds;
@@ -41,7 +46,7 @@ void search(std::string input_path, std::string sbwt_path, bool filter_n) {
   auto t1 = high_resolution_clock::now();
   buf_t buf;
   if (sbwt_path.size() > 0) {
-    buf.load(sbwt_path);  
+    buf.load(sbwt_path);
   }
 
   auto t2 = high_resolution_clock::now();
@@ -53,18 +58,28 @@ void search(std::string input_path, std::string sbwt_path, bool filter_n) {
 
   std::vector<std::string> input_files;
   if (input_path.ends_with(".txt")) {
-    input_files = sbwt::readlines(input_path);
+    input_files = sbwt::readlines(input_path, data_dir);
   } else {
-    input_files.push_back(input_path);
+    input_files.push_back(data_dir + input_path);
   }
-
-  sbwt::io_container<K> reader(input_files, false, filter_n);
+  sbwt::ensure_exists(input_files);
+  t2 = high_resolution_clock::now();
 
   std::string q_s;
   uint64_t hits = 0;
   uint64_t count = 0;
-  while (reader.get(q_s)) {
-    buf.streaming_search(q_s, count, hits);
+  if (input_files[0].ends_with(".gz")) {
+    sbwt::io_container<K, true> reader(input_files, false, filter_n);
+
+    while (reader.get(q_s)) {
+      buf.streaming_search(q_s, count, hits);
+    }
+  } else {
+    sbwt::io_container<K> reader(input_files, false, filter_n);
+
+    while (reader.get(q_s)) {
+      buf.streaming_search(q_s, count, hits);
+    }
   }
 
   t1 = high_resolution_clock::now();
@@ -80,6 +95,7 @@ int main(int argc, char const* argv[]) {
   bool filter_n = true;
   std::string in_sbwt = "";
   std::string in_files = "";
+  std::string data_dir = "";
 
   for (size_t i = 1; i < size_t(argc); ++i) {
     std::string arg(argv[i]);
@@ -89,13 +105,16 @@ int main(int argc, char const* argv[]) {
     }
     if (arg == "-n") {
       filter_n = false;
-    } if (arg == "-i") { 
+    }
+    if (arg == "-i") {
       in_sbwt = argv[++i];
+    } else if (arg == "-d") {
+      data_dir = argv[++i];
     } else {
       if (in_files.size() == 0) {
         in_files = argv[i];
       } else {
-        std::cerr << "At most one text file in the paramerters\n" 
+        std::cerr << "At most one text file in the paramerters\n"
                   << "current: " << in_files << "\n"
                   << "new: " << argv[i] << std::endl;
         help(argv[0]);
@@ -105,9 +124,10 @@ int main(int argc, char const* argv[]) {
   }
   std::cout << "sbwt: " << (in_sbwt.size() > 0 ? in_sbwt : "N/A") << "\n"
             << "text file: " << in_files << "\n"
+            << "fasta dir: " << (data_dir.size() ? data_dir : "N/A") << "\n"
             << "filter N characters: " << filter_n << std::endl;
   if (in_files.size() > 0) {
-    search(in_files, in_sbwt, filter_n);
+    search(in_files, in_sbwt, filter_n, data_dir);
     exit(0);
   } else {
     std::cerr << "File(s) to search is required" << std::endl;
