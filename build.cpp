@@ -158,6 +158,9 @@ int main(int argc, char const* argv[]) {
   if (num_threads != omp_get_max_threads()) {
     omp_set_num_threads(num_threads);
   }
+  if (data_folder.size() > 0 && not data_folder.ends_with("/")) {
+    data_folder.append("/");
+  }
   std::cout << "in sbwt: " << (in_sbwt.size() ? in_sbwt : "N/A") << "\n"
             << "out_sbwt: " << (out_sbwt.size() ? out_sbwt : "N/A") << "\n"
             << "text file: " << (in_files.size() ? in_files : "N/A") << "\n"

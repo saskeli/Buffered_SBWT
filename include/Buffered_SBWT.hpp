@@ -562,107 +562,129 @@ class Buffered_SBWT {
 #ifdef VERBOSE
       std::cerr << buffer_[buffer_idx].to_string() << std::endl;
 #endif
-      if (buffer_[buffer_idx].group_head &&
-          suffix_group_starts_[buffer_[buffer_idx].source]) {
-        std::array<bool, 4> edges = {false, false, false, false};
-        bool replace = false;
-        for (uint16_t i = 0; i < 4; ++i) {
-          edges[i] = bits_[i][buffer_[buffer_idx].source] !=
-                     buffer_[buffer_idx].edge[i];
-          replace |= edges[i];
-        }
-        // if replace is false everything will be fine with naive removal.
-        if (replace) {
-          // We need to put at least one child somewhere else in this suffix
-          // group.
-          uint64_t trg = buffer_[buffer_idx].source + 1;
-          uint64_t sib = buffer_idx + 1;
-          for (uint64_t i = 1; i < 4; ++i) {
-            // There is nowhere to more to go, since we are out of sbwt.
-            if (trg >= n_nodes_) {
+      if (buffer_[buffer_idx].group_head) {
+        if (not suffix_group_starts_[buffer_[buffer_idx].source]) [[unlikely]] {
+          uint64_t sgl = buffer_[buffer_idx].source - 1;
+          for (uint64_t i = 0; i < 3; ++i) {
+            if (suffix_group_starts_[sgl]) [[likely]] {
               break;
             }
-            // There is nowhere more to go, since we are out of suffix group.
-            if (suffix_group_starts_[trg]) {
-              break;
-            }
-            // There is another element in the suffix group.
-            if (sib < buffer_.size() && buffer_[sib].source == trg) {
-              // But it is the next element in the buffer.
-              ++sib;
-              ++trg;
-            } else {
-              // And we can use it!
-              replace = false;
-              uint64_t w_i = trg / 64;
-              uint64_t w_b = ONE << (trg % 64);
-              for (uint16_t bi = 0; bi < 4; ++bi) {
-                if (edges[bi]) {
-                  uint64_t* d = new_bits_[bi].data();
-#pragma omp atomic
-                  d[w_i] = d[w_i] | w_b;
-                }
-              }
-              // Should be fine to set suffix group start, since there is at
-              // most one leader for one suffix group so we will not walk this
-              // more than once.
-              uint64_t* d = suffix_group_starts_.data();
+            sgl--;
+          }
+          uint64_t w_i = sgl / 64;
+          uint64_t w_b = ONE << (sgl % 64);
+          for (uint16_t i = 0; i < 4; ++i) {
+            if (buffer_[buffer_idx].edge[i]) {
+              uint64_t* d = new_bits_[i].data();
 #pragma omp atomic
               d[w_i] = d[w_i] | w_b;
-              break;
             }
           }
         } else {
-          // We still need ot update the suffix group leader unless this group
-          // becomes empty.
-          uint64_t sib = buffer_idx + 1;
-          for (uint64_t i = 1; i < 4; ++i) {
-            uint64_t trg = buffer_[buffer_idx].source + i;
-            if (trg >= n_nodes_) {
-              // Out of sbwt.
-              break;
-            }
-            if (not suffix_group_starts_[trg]) {
-              // Next element in sbwt is in same suffix group.
-              if (buffer_.size() <= sib || buffer_[sib].source != trg) {
-                // And will not be reomved. So can become new group leader.
-                uint64_t* d = suffix_group_starts_.data();
+          std::array<bool, 4> edges = {false, false, false, false};
+          bool replace = false;
+          for (uint16_t i = 0; i < 4; ++i) {
+            edges[i] = bits_[i][buffer_[buffer_idx].source] !=
+                       buffer_[buffer_idx].edge[i];
+            replace |= edges[i];
+          }
+          // if replace is false everything will be fine with naive removal.
+          if (replace) [[unlikely]] {
+            // We need to put at least one child somewhere else in this suffix
+            // group.
+            uint64_t trg = buffer_[buffer_idx].source + 1;
+            uint64_t sib = buffer_idx + 1;
+            for (uint64_t i = 1; i < 4; ++i) {
+              if (trg >= n_nodes_) [[unlikely]] {
+                // There is nowhere more to go, since we are out of sbwt.
+                break;
+              }
+              if (suffix_group_starts_[trg]) [[likely]] {
+                // There is nowhere more to go, since we are out of suffix
+                // group.
+                break;
+              }
+              // There is another element in the suffix group.
+              if (sib < buffer_.size() && buffer_[sib].source == trg) {
+                // But it is the next element in the buffer.
+                ++sib;
+                ++trg;
+              } else {
+                // And we can use it!
+                replace = false;
                 uint64_t w_i = trg / 64;
                 uint64_t w_b = ONE << (trg % 64);
+                for (uint16_t bi = 0; bi < 4; ++bi) {
+                  if (edges[bi]) {
+                    uint64_t* d = new_bits_[bi].data();
+#pragma omp atomic
+                    d[w_i] = d[w_i] | w_b;
+                  }
+                }
+                // Should be fine to set suffix group start, since there is at
+                // most one leader for one suffix group so we will not walk this
+                // more than once.
+                uint64_t* d = suffix_group_starts_.data();
 #pragma omp atomic
                 d[w_i] = d[w_i] | w_b;
-              } else {
-                // But next element gets removed also.
-                ++sib;
+                break;
               }
-            } else {
-              // Next element is in different suffix group.
-              break;
+            }
+          } else {
+            // We still need ot update the suffix group leader unless this group
+            // becomes empty.
+            uint64_t sib = buffer_idx + 1;
+            for (uint64_t i = 1; i < 4; ++i) {
+              uint64_t trg = buffer_[buffer_idx].source + i;
+              if (trg >= n_nodes_) [[unlikely]] {
+                // Out of sbwt.
+                break;
+              }
+              if (not suffix_group_starts_[trg]) [[unlikely]] {
+                // Next element in sbwt is in same suffix group.
+                if (buffer_.size() <= sib || buffer_[sib].source != trg) {
+                  // And will not be reomved. So can become new group leader.
+                  uint64_t* d = suffix_group_starts_.data();
+                  uint64_t w_i = trg / 64;
+                  uint64_t w_b = ONE << (trg % 64);
+#pragma omp atomic
+                  d[w_i] = d[w_i] | w_b;
+                } else {
+                  // But next element gets removed also.
+                  ++sib;
+                }
+              } else {
+                // Next element is in different suffix group.
+                break;
+              }
             }
           }
-        }
-        // Replacement was a no go.
-        // A new dummy is needed to replace a removed suffix group.
-        if (replace) {
+          // Replacement was a no go.
+          // A new dummy is needed to replace a removed suffix group.
+          if (replace) [[unlikely]] {
 #pragma omp critical
-          { dummies.replace(buffer_[buffer_idx].kmer, edges, *this); }
+            { dummies.replace(buffer_[buffer_idx].kmer, edges, *this); }
+          }
         }
       }
 
-      // Make sure no dangling edge gets left behind.
-      uint64_t d_id;
+      if (not buffer_[buffer_idx].b_pred) {
+        // Make sure no dangling edge gets left behind.
+        uint64_t d_id;
 #pragma omp critical
-      { d_id = dummies.remove_edge(buffer_[buffer_idx].kmer, *this); }
-      // if d_id > 0, parent is a dummy and edge got removed.
-      if (d_id == 0) {
-        // Parent is not a dummy.
-        auto P = search_kmer<Kmer_t, k - 1, 0, false>(buffer_[buffer_idx].kmer);
-        uint16_t v = buffer_[buffer_idx].kmer.get_v(k - 1);
-        uint64_t w_i = P.first / 64;
-        uint64_t w_b = ONE << (P.first % 64);
-        uint64_t* d = new_bits_[v].data();
+        { d_id = dummies.remove_edge(buffer_[buffer_idx].kmer, *this); }
+        // if d_id > 0, parent is a dummy and edge got removed.
+        if (d_id == 0) {
+          // Parent is not a dummy.
+          auto P =
+              search_kmer<Kmer_t, k - 1, 0, false>(buffer_[buffer_idx].kmer);
+          uint16_t v = buffer_[buffer_idx].kmer.get_v(k - 1);
+          uint64_t w_i = P.first / 64;
+          uint64_t w_b = ONE << (P.first % 64);
+          uint64_t* d = new_bits_[v].data();
 #pragma omp atomic
-        d[w_i] = d[w_i] | w_b;
+          d[w_i] = d[w_i] | w_b;
+        }
       }
     }
 
@@ -813,18 +835,20 @@ class Buffered_SBWT {
       }
       uint64_t copy_count = std::min(next_i, o_size) - sbwt_index;
       copy_count = std::min(n_size - write_index, copy_count);
-      #ifdef DEBUG
+#ifdef DEBUG
       if (sbwt_index + copy_count > o_size) {
-        std::cerr << "Can't copy " << copy_count << " elements from " << sbwt_index
-                  << "\nGoes " << sbwt_index + copy_count - o_size << std::endl;
+        std::cerr << "Can't copy " << copy_count << " elements from "
+                  << sbwt_index << "\nGoes " << sbwt_index + copy_count - o_size
+                  << std::endl;
         exit(1);
       }
       if (write_index + copy_count > n_size) {
-        std::cerr << "Can't copy " << copy_count << " elements to " << write_index
-                  << "\nGoes " << write_index + copy_count - n_size << std::endl;
+        std::cerr << "Can't copy " << copy_count << " elements to "
+                  << write_index << "\nGoes "
+                  << write_index + copy_count - n_size << std::endl;
         exit(1);
       }
-      #endif
+#endif
       uint64_t w;
       uint64_t w_i = write_index / 64;
       uint8_t w_o = write_index % 64;

@@ -122,6 +122,9 @@ int main(int argc, char const* argv[]) {
       }
     }
   }
+  if (data_dir.size() > 0 && not data_dir.ends_with("/")) {
+    data_dir.append("/");
+  }
   std::cout << "sbwt: " << (in_sbwt.size() > 0 ? in_sbwt : "N/A") << "\n"
             << "text file: " << in_files << "\n"
             << "fasta dir: " << (data_dir.size() ? data_dir : "N/A") << "\n"

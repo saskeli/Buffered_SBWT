@@ -86,6 +86,9 @@ int main(int argc, char const* argv[]) {
     if (counter % 10000 == 0) {
       std::cout << (counter / 1000) << "k\r" << std::flush;
     }
+#ifdef DEBUG
+    std::cout << a << " " << b << std::endl;
+#endif
     buf_t buf;
     buf.add(a);
     buf.add(b);
@@ -113,6 +116,9 @@ int main(int argc, char const* argv[]) {
     } else {
       c = b.substr(rnd() % (n - len + 1), len);
     }
+#ifdef DEBUG
+    std::cout << c << std::endl;
+#endif
     buf.del(c);
     del_all(control, c);
     d_set.clear();
@@ -132,6 +138,9 @@ int main(int argc, char const* argv[]) {
     } else {
       d = b.substr(rnd() % (n - len + 1), len);
     }
+#ifdef DEBUG
+    std::cout << d << std::endl;
+#endif
     buf.del(d);
     del_all(control, d);
     d_set.clear();
@@ -145,8 +154,13 @@ int main(int argc, char const* argv[]) {
                 << std::endl;
       exit(1);
     }
-
+#ifdef DEBUG
+    std::cout << a << std::endl;
+#endif
     buf.del(a);
+#ifdef DEBUG
+    std::cout << b << std::endl;
+#endif
     buf.del(b);
     auto r = buf.reconstruct_all_kmers();
     if (not buf.is_valid() || r.size() != 1) {
