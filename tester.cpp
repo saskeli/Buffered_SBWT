@@ -9,7 +9,7 @@
 
 #include "Buffered_SBWT.hpp"
 
-#define K 8
+#define K 6
 
 #define PRECALC_K 3
 
@@ -45,6 +45,7 @@ int main(int argc, char const* argv[]) {
     a = argv[1];
     b = argv[2];
     buf.add(a);
+    buf.print();
     buf.add(b);
     add_all(control, a);
     add_all(control, b);

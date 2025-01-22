@@ -41,7 +41,8 @@ Options:
                  input fasta files. Use in case the input list contains only file names.
   -h             Print help and terminate. Overrides other parameters.
 
-Example: )" << bin_l << R"( -r -m 8 -d data/ -f fof.txt out/fof.sbwt
+Example: )" << bin_l
+            << R"( -r -m 8 -d data/ -f fof.txt out/fof.sbwt
 )" << std::endl;
 }
 
@@ -49,7 +50,8 @@ typedef sbwt::Buffered_SBWT<K, PRECALC_K> buf_t;
 
 void add_files(std::string input_path, std::string output_path,
                std::string sbwt_path, bool rev_comp, bool filter_n,
-               double buffer_gigs, bool old_output_format, std::string data_folder) {
+               double buffer_gigs, bool old_output_format,
+               std::string data_folder) {
   using std::chrono::duration_cast;
   using std::chrono::high_resolution_clock;
   using std::chrono::nanoseconds;
@@ -104,11 +106,17 @@ void add_files(std::string input_path, std::string output_path,
     std::cerr << "Validation fail!" << std::endl;
   }
 #endif
+  t1 = high_resolution_clock::now();
   if (old_output_format) [[unlikely]] {
     buf.serialize_old_format(output_path);
   } else {
     buf.serialize(output_path);
   }
+  t2 = high_resolution_clock::now();
+  double ser_time = duration_cast<nanoseconds>(t2 - t1).count();
+  ser_time /= 1000000;
+  std::cout << "Wrote " << output_path << " with " << n_size << " " << K
+            << "-mers to file in " << ser_time << " ms" << std::endl;
 }
 
 int main(int argc, char const* argv[]) {
@@ -164,7 +172,8 @@ int main(int argc, char const* argv[]) {
   std::cout << "in sbwt: " << (in_sbwt.size() ? in_sbwt : "N/A") << "\n"
             << "out_sbwt: " << (out_sbwt.size() ? out_sbwt : "N/A") << "\n"
             << "text file: " << (in_files.size() ? in_files : "N/A") << "\n"
-            << "fasta dir: " << (data_folder.size() ? data_folder : "N/A") << "\n"
+            << "fasta dir: " << (data_folder.size() ? data_folder : "N/A")
+            << "\n"
             << "extract reverse complements: " << rev_comp << "\n"
             << "filter N characters: " << filter_n << "\n"
             << "max buffer size (ish): " << buffer_gigs << " gigs\n"

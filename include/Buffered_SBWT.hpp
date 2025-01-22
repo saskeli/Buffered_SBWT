@@ -259,6 +259,10 @@ class Buffered_SBWT {
     compute_buffer_edges();
     Dummy_trie dummies(*this);
 #ifdef VERBOSE
+    std::cerr << "buffer pos-sort with internal edges:" << std::endl;
+    for (uint64_t p_i = 0; p_i < buffer_.size(); ++p_i) {
+      std::cerr << buffer_[p_i].to_string() << std::endl;
+    }
     uint64_t v_last = 0;
 #endif
 #pragma omp parallel for
@@ -367,6 +371,14 @@ class Buffered_SBWT {
     std::cerr << "Addable dummies: " << std::endl;
     for (auto ad : addables) {
       std::cerr << ad.to_string() << std::endl;
+    }
+
+    std::cerr << "XOR table:" << std::endl;
+    for (uint64_t i = 0; i < new_bits_[0].size(); ++i) {
+      for (uint16_t ci = 0; ci < 4; ++ci) {
+        std::cerr << new_bits_[ci][i] << " ";
+      }
+      std::cerr << std::endl;
     }
 #endif
 
@@ -556,12 +568,15 @@ class Buffered_SBWT {
     setup_buffer();
     compute_buffer_edges();
     Dummy_trie dummies(*this);
+    #ifdef VERBOSE
+    std::cerr << "buffer with internal edges:" << std::endl;
+    for (uint64_t pi = 0; pi < buffer_.size(); ++pi) {
+      std::cerr << buffer_[pi].to_string() << std::endl;
+    }
+#endif
 #pragma omp parallel for
     for (uint64_t buffer_idx = 0; buffer_idx < buffer_.size(); ++buffer_idx) {
 // Make sure no surviving child gets orphaned.
-#ifdef VERBOSE
-      std::cerr << buffer_[buffer_idx].to_string() << std::endl;
-#endif
       if (buffer_[buffer_idx].group_head) {
         if (not suffix_group_starts_[buffer_[buffer_idx].source]) [[unlikely]] {
           uint64_t sgl = buffer_[buffer_idx].source - 1;
@@ -693,6 +708,11 @@ class Buffered_SBWT {
     dummies.update_removals(removables, addables, *this);
 
 #ifdef VERBOSE
+    std::cerr << "Fully computed buffer: " << std::endl;
+    for (uint64_t pi = 0; pi < buffer_.size(); ++pi) {
+      std::cerr << buffer_[pi].to_string() << std::endl;
+    }
+    
     std::cerr << "Removable dummy indexes: " << std::endl;
     for (auto rd : removables) {
       std::cerr << rd << std::endl;

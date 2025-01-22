@@ -107,11 +107,17 @@ void remove_files(std::string input_path, std::string output_path,
     std::cerr << "Validation fail!" << std::endl;
   }
 #endif
+  t1 = high_resolution_clock::now();
   if (old_output_format) [[unlikely]] {
     buf.serialize_old_format(output_path);
   } else {
     buf.serialize(output_path);
   }
+  t2 = high_resolution_clock::now();
+  double ser_time = duration_cast<nanoseconds>(t2 - t1).count();
+  ser_time /= 1000000;
+  std::cout << "Wrote " << output_path << " with " << n_size << " " << K
+            << "-mers to file in " << ser_time << " ms" << std::endl;
 }
 
 int main(int argc, char const* argv[]) {
